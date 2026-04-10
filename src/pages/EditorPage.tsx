@@ -6,7 +6,16 @@ import { EditorForm } from '../components/EditorForm';
 import { ResumePreview } from '../components/ResumePreview';
 import { templates } from '../data/templates';
 
-const PDF_SERVICE_URL = import.meta.env.VITE_PDF_SERVICE_URL ?? 'http://localhost:3040';
+/**
+ * POST endpoint for the Playwright PDF service — only from `VITE_PDF_SERVICE_URL` (no defaults in code).
+ * Use a full URL ending in `/pdf`, or a base URL (we append `/pdf` if missing).
+ */
+function resolvePdfExportUrl(): string | null {
+  const raw = import.meta.env.VITE_PDF_SERVICE_URL?.trim();
+  if (!raw) return null;
+  if (raw.endsWith('/pdf')) return raw;
+  return `${raw.replace(/\/$/, '')}/pdf`;
+}
 
 export function EditorPage() {
   const navigate = useNavigate();
@@ -27,10 +36,18 @@ export function EditorPage() {
 
     setIsExporting(true);
     try {
+      const pdfUrl = resolvePdfExportUrl();
+      if (!pdfUrl) {
+        alert(
+          'PDF export is not configured. Set VITE_PDF_SERVICE_URL in .env.local (see .env.example) and restart the dev server, or set it in your host build environment.',
+        );
+        return;
+      }
+
       await document.fonts.ready;
 
       const printUrl = `${window.location.origin}/print`;
-      const response = await fetch(`${PDF_SERVICE_URL}/pdf`, {
+      const response = await fetch(pdfUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -61,7 +78,7 @@ export function EditorPage() {
     } catch (error) {
       console.error('Error generating PDF:', error);
       alert(
-        'Could not generate PDF. Start the PDF service (npm run pdf-service) and ensure Chromium is installed (npx playwright install chromium).',
+        'Could not generate PDF. Check that the PDF API is running, CORS allows this site, and VITE_PDF_SERVICE_URL is correct.',
       );
     } finally {
       setIsExporting(false);

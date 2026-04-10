@@ -19,7 +19,7 @@ alwaysApply: false
 
 ## PDF
 
-- Export uses **Playwright** ([pdf-service/server.mjs](pdf-service/server.mjs)): `POST /pdf` with `{ printUrl, snapshot }` opens [`/print`](src/pages/PrintPage.tsx) in Chromium (sessionStorage primed via `addInitScript`), waits for `[data-print-ready="true"]`, then `page.pdf`. Run `npm run pdf-service` and `npx playwright install chromium`. Optional `VITE_PDF_SERVICE_URL` overrides the default `http://localhost:3040` ([EditorPage](src/pages/EditorPage.tsx)).
+- PDF export requires **`VITE_PDF_SERVICE_URL`** (see [.env.example](.env.example)); no API URL is hardcoded in the app. `resolvePdfExportUrl()` in [EditorPage](src/pages/EditorPage.tsx) accepts a full `.../pdf` URL or a base URL (appends `/pdf` when missing). The Playwright server lives in [pdf-service](pdf-service/). Ensure **CORS** on the PDF server allows your static site origin.
 - PDF matches the **same React templates** as the live preview; prefer solid `color` for headings (avoid `background-clip: text`) for consistency across browsers.
 
 ## Data

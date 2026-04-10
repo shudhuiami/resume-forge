@@ -9,7 +9,10 @@ dist/
 /playwright-report/
 /blob-report/
 playwright/.cache/
-
+/pdf-service/package-lock.json
+/pdf-service/node_modules/
+/pdf-service/package.json
+/pdf-service/server.mjs
 # Local env
 .env
 .env.local
