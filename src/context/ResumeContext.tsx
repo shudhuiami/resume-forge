@@ -29,9 +29,22 @@ interface ResumeContextType {
 
 const ResumeContext = createContext<ResumeContextType | undefined>(undefined);
 
-export function ResumeProvider({ children }: { children: ReactNode }) {
-  const [resumeData, setResumeData] = useState<ResumeData>(defaultResumeData);
-  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
+export function ResumeProvider({
+  children,
+  initialResumeData,
+  initialTemplate = null,
+}: {
+  children: ReactNode;
+  /** Used by template gallery / tests; app shell omits this. */
+  initialResumeData?: ResumeData;
+  initialTemplate?: Template | null;
+}) {
+  const [resumeData, setResumeData] = useState<ResumeData>(
+    () => initialResumeData ?? defaultResumeData
+  );
+  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(
+    () => initialTemplate ?? null
+  );
 
   return (
     <ResumeContext.Provider value={{ resumeData, setResumeData, selectedTemplate, setSelectedTemplate }}>

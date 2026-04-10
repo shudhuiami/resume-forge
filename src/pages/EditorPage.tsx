@@ -1,18 +1,17 @@
 import { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Download, FileText, Loader2, ZoomIn, ZoomOut, Eye, Palette } from 'lucide-react';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
 import { useResume } from '../context/ResumeContext';
 import { EditorForm } from '../components/EditorForm';
 import { ResumePreview } from '../components/ResumePreview';
 import { templates } from '../data/templates';
 
+const PDF_SERVICE_URL = import.meta.env.VITE_PDF_SERVICE_URL ?? 'http://localhost:3040';
+
 export function EditorPage() {
   const navigate = useNavigate();
-  const { selectedTemplate, setSelectedTemplate } = useResume();
+  const { resumeData, selectedTemplate, setSelectedTemplate } = useResume();
   const resumeRef = useRef<HTMLDivElement>(null);
-  const printRef = useRef<HTMLDivElement>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [zoom, setZoom] = useState(0.5);
   const [showTemplateSelector, setShowTemplateSelector] = useState(false);
@@ -24,74 +23,46 @@ export function EditorPage() {
   }, [selectedTemplate, navigate]);
 
   const handleExportPDF = async () => {
-    if (!printRef.current) return;
+    if (!selectedTemplate) return;
 
     setIsExporting(true);
     try {
-      const element = printRef.current;
-      
-      // Wait for fonts to be ready
       await document.fonts.ready;
-      
-      // Wait for any images to load
-      const images = element.querySelectorAll('img');
-      await Promise.all(
-        Array.from(images).map((img) => {
-          if (img.complete) return Promise.resolve();
-          return new Promise((resolve) => {
-            img.onload = resolve;
-            img.onerror = resolve;
-          });
-        })
-      );
 
-      // Small delay to ensure everything is rendered
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Render the element to canvas with exact dimensions
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        width: 794,
-        height: 1123,
-        windowWidth: 794,
-        windowHeight: 1123,
-        onclone: (clonedDoc, clonedElement) => {
-          // Ensure the cloned element has the exact styles
-          clonedElement.style.width = '794px';
-          clonedElement.style.height = '1123px';
-          clonedElement.style.overflow = 'hidden';
-          clonedElement.style.transform = 'none';
-          
-          // Force font rendering
-          clonedDoc.body.style.fontFamily = "'Inter', 'Playfair Display', 'Source Code Pro', Georgia, sans-serif";
-        }
+      const printUrl = `${window.location.origin}/print`;
+      const response = await fetch(`${PDF_SERVICE_URL}/pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          printUrl,
+          snapshot: { resumeData, selectedTemplate },
+        }),
       });
 
-      // Create PDF with exact A4 dimensions
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4',
-        compress: true
-      });
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!response.ok) {
+        const errText = contentType.includes('application/json')
+          ? JSON.stringify(await response.json())
+          : await response.text();
+        throw new Error(errText || `HTTP ${response.status}`);
+      }
 
-      // A4 in mm: 210 x 297
-      const pdfWidth = 210;
-      const pdfHeight = 297;
-      
-      // Convert canvas to image
-      const imgData = canvas.toDataURL('image/png', 1.0);
+      if (!contentType.includes('application/pdf')) {
+        throw new Error('PDF service did not return a PDF');
+      }
 
-      // Add image to fill the entire page
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-      
-      pdf.save('resume.pdf');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'resume.pdf';
+      a.click();
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error generating PDF:', error);
-      alert('Error generating PDF. Please try again.');
+      alert(
+        'Could not generate PDF. Start the PDF service (npm run pdf-service) and ensure Chromium is installed (npx playwright install chromium).',
+      );
     } finally {
       setIsExporting(false);
     }
@@ -291,18 +262,6 @@ export function EditorPage() {
             <ResumePreview ref={resumeRef} />
           </div>
         </div>
-      </div>
-
-      {/* Hidden container for PDF export - positioned off-screen without transforms */}
-      <div 
-        style={{ 
-          position: 'absolute', 
-          left: '-10000px', 
-          top: 0,
-        }}
-        aria-hidden="true"
-      >
-        <ResumePreview ref={printRef} />
       </div>
     </div>
   );

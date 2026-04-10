@@ -1,0 +1,27 @@
+---
+description: ResumeForge conventions — templates, layout, PDF export, and gallery
+globs: "**/*.{ts,tsx}"
+alwaysApply: false
+---
+
+# ResumeForge
+
+## Layout
+
+- Resume canvas is **A4** using `A4_WIDTH_PX` / `A4_HEIGHT_PX` from [src/constants/layout.ts](src/constants/layout.ts). Keep [pdf-service/server.mjs](pdf-service/server.mjs) viewport and `page.pdf` dimensions in sync when changing these.
+
+## Templates
+
+- Add templates in [src/templates/registry.ts](src/templates/registry.ts): metadata in `templates` array **and** an entry in `templateComponents` with matching `id`.
+- Implement the UI in `src/templates/...` (see existing `modern/`, `additional/SetA.tsx`, etc.). Template components use `useResume()`; they must render a root at **794×1123** px (or use shared constants).
+- **Do not** hand-build separate mini-previews on the templates gallery — use [TemplateThumbnail](src/components/TemplateThumbnail.tsx) (real `ResumePreview` + `sampleResume`).
+- Prefer `category`, `bestFor`, and `colors` on the `Template` type for gallery cards.
+
+## PDF
+
+- Export uses **Playwright** ([pdf-service/server.mjs](pdf-service/server.mjs)): `POST /pdf` with `{ printUrl, snapshot }` opens [`/print`](src/pages/PrintPage.tsx) in Chromium (sessionStorage primed via `addInitScript`), waits for `[data-print-ready="true"]`, then `page.pdf`. Run `npm run pdf-service` and `npx playwright install chromium`. Optional `VITE_PDF_SERVICE_URL` overrides the default `http://localhost:3040` ([EditorPage](src/pages/EditorPage.tsx)).
+- PDF matches the **same React templates** as the live preview; prefer solid `color` for headings (avoid `background-clip: text`) for consistency across browsers.
+
+## Data
+
+- Gallery and tests use [sampleResume](src/data/sampleResume.ts) via `ResumeProvider`’s `initialResumeData` / `initialTemplate`.

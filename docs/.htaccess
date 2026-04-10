@@ -1,0 +1,11 @@
+# Hostinger / Apache: send client-side routes to index.html (React Router).
+# If the site lives in a subfolder, set RewriteBase (e.g. RewriteBase /myapp/).
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>

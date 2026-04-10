@@ -4,6 +4,12 @@ node_modules/
 # Build
 dist/
 
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+playwright/.cache/
+
 # Local env
 .env
 .env.local

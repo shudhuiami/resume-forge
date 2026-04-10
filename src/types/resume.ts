@@ -66,6 +66,13 @@ export interface ResumeData {
   customFields: CustomField[];
 }
 
+export type TemplateCategory =
+  | 'corporate'
+  | 'creative'
+  | 'tech'
+  | 'academic'
+  | 'minimal';
+
 export interface Template {
   id: string;
   name: string;
@@ -76,4 +83,7 @@ export interface Template {
     secondary: string;
     accent: string;
   };
+  category: TemplateCategory;
+  bestFor: string;
+  tags?: string[];
 }

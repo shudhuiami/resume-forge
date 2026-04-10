@@ -8,7 +8,7 @@ export function LandingPage() {
     {
       icon: <Palette className="w-6 h-6" />,
       title: 'Beautiful Templates',
-      description: 'Choose from 5+ professionally designed templates crafted to impress recruiters.',
+      description: 'Choose from 20+ professionally designed templates crafted to impress recruiters.',
     },
     {
       icon: <Zap className="w-6 h-6" />,
