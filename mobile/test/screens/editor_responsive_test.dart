@@ -134,6 +134,35 @@ void main() {
     });
   });
 
+  group('editor form width', () {
+    testWidgets('does not stretch single-line fields across a tablet', (
+      tester,
+    ) async {
+      await pumpEditor(tester, const Size(768, 1024), sampleResume);
+
+      // Edge-to-edge fields at 736px read as an admin table rather than a
+      // document editor, and drag the eye across empty space between a label
+      // and its value. Matches the constraint the resume list applies.
+      final field = tester.getSize(find.byType(TextFormField).first);
+      expect(
+        field.width,
+        lessThanOrEqualTo(640),
+        reason: 'the form must stop widening past a readable measure',
+      );
+    });
+
+    testWidgets('still uses the full width on a phone', (tester) async {
+      await pumpEditor(tester, const Size(390, 844), sampleResume);
+
+      final field = tester.getSize(find.byType(TextFormField).first);
+      expect(
+        field.width,
+        greaterThan(300),
+        reason: 'the constraint must not shrink a phone form',
+      );
+    });
+  });
+
   group('editor exposes its actions', () {
     testWidgets('design switch and export are both reachable', (tester) async {
       await pumpEditor(tester, const Size(390, 844), sampleResume);

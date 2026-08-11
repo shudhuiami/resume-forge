@@ -11,6 +11,11 @@ import '../widgets/form_fields.dart';
 import '../widgets/pdf_page_view.dart';
 import 'gallery_screen.dart';
 
+/// Widest the editor form is allowed to grow. Beyond this a single-line field
+/// stretches far past a comfortable reading measure and the form stops looking
+/// like a document editor.
+const _maxFormWidth = 640.0;
+
 /// Form-first resume editor.
 ///
 /// The preview lives in its own tab rather than beside the form. An A4 page
@@ -245,6 +250,19 @@ class _EditorForm extends StatelessWidget {
     final tokens = context.tokens;
     final info = data.personalInfo;
 
+    // A tablet-width form runs single-line fields edge to edge across ~736px,
+    // which reads as an admin table rather than a document editor and drags the
+    // eye across a lot of empty space between a label and its value. Matches
+    // the constraint the resume list already applies.
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: _maxFormWidth),
+        child: _buildForm(context, tokens, info),
+      ),
+    );
+  }
+
+  Widget _buildForm(BuildContext context, AppTokens tokens, PersonalInfo info) {
     return ListView(
       // Addressable so tests can scroll this list rather than the TabBarView's
       // own PageView, which is the first Scrollable in the tree.
