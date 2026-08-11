@@ -25,6 +25,15 @@ abstract class ResumeRepository {
   Future<void> close();
 }
 
+/// Upper bound for the random id suffix.
+///
+/// Deliberately 2^30 and not 2^32. On dart2js an `int` is a double and `<<` is
+/// a 32-bit operation, so `1 << 32` evaluates to **0** — and `Random.nextInt(0)`
+/// throws. That made resume creation fail on web while working perfectly on the
+/// VM, so every widget test passed while the real app could not create a
+/// document at all. Keep this comfortably inside 32 bits.
+const _idSuffixBound = 1 << 30;
+
 /// Generates a document id.
 ///
 /// Timestamp prefix keeps ids roughly sortable by creation, which makes a
@@ -33,7 +42,7 @@ abstract class ResumeRepository {
 String newResumeId([Random? random]) {
   final rng = random ?? Random();
   final stamp = DateTime.now().millisecondsSinceEpoch.toRadixString(36);
-  final suffix = rng.nextInt(1 << 32).toRadixString(36).padLeft(7, '0');
+  final suffix = rng.nextInt(_idSuffixBound).toRadixString(36).padLeft(6, '0');
   return '$stamp-$suffix';
 }
 
