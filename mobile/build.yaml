@@ -1,0 +1,15 @@
+targets:
+  $default:
+    builders:
+      json_serializable:
+        options:
+          # Nested models must be converted to maps by toJson() rather than
+          # left as object instances. Without this, ResumeData.toJson() returns
+          # a map still containing PersonalInfo/Experience objects, which blows
+          # up on the fromJson cast and silently breaks any consumer that reads
+          # the map directly instead of going through jsonEncode.
+          explicit_to_json: true
+          # Absent keys should fall back to the field's @Default rather than
+          # throwing, so a document written by an older build still loads.
+          create_to_json: true
+          include_if_null: false

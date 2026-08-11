@@ -27,6 +27,7 @@ playwright/.cache/
 *.sln
 *.sw?
 
-# Capacitor
-android/
-ios/
+# Capacitor (web app only) — anchored to repo root so the Flutter project's
+# mobile/android and mobile/ios platform directories stay tracked.
+/android/
+/ios/
