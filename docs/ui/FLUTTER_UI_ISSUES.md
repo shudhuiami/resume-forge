@@ -50,6 +50,8 @@ was not actually used.
 
 | UI-015 | editor | _EditorForm | P2 | responsive | 768x1024 (web/chrome) | Single-line fields stop at a readable measure on a tablet | Form stretched edge to edge across ~736px, reading as an admin table rather than a document editor. Found only by looking at the running app; every widget test passed because nothing overflowed | Fixed: 640px max form width, matching the resume list. `test/screens/editor_responsive_test.dart` covers both tablet and phone | fixed |
 
+| UI-016 | editor, export | EditorScreen | **P1** | state | n/a | A resume never silently loses a job | Templates drop content that does not fit rather than flowing to a second page, and measured capacity is only 4-7 roles depending on the design — inside a normal career. Content vanished with no warning, no extra page, and no visible gap, and the preview agreed with the export because both were truncated identically. **Partly fixed:** export now detects the loss and asks the user to confirm. The underlying one-page limit remains; UI-010 (multi-page) is the real fix | `lib/render/truncation_check.dart`; measured capacity per template recorded in the commit message | in-progress |
+
 <!--
 Row template:
 

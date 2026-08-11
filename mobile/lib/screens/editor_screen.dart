@@ -1,11 +1,15 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/photo_service.dart';
 import '../models/resume.dart';
 import '../render/pdf_export.dart';
+import '../render/truncation_check.dart';
 import '../state/app_providers.dart';
 import '../state/editor_controller.dart';
+import '../templates/registry.dart';
 import '../theme/tokens.dart';
 import '../widgets/form_fields.dart';
 import '../widgets/pdf_page_view.dart';
@@ -98,10 +102,32 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     );
 
     try {
-      final bytes = await _controller.buildForExport();
+      // Run alongside the export build rather than after it: the check costs
+      // one render per populated section, and serialising them would double
+      // the wait before the share sheet appears.
+      final results = await Future.wait([
+        _controller.buildForExport(),
+        TruncationCheck.run(
+          template: templateById(_controller.state.doc.templateId),
+          data: _controller.state.data,
+        ),
+      ]);
+      final bytes = results[0] as Uint8List;
+      final truncation = results[1] as TruncationReport;
+
       // Closed before the sheet opens, and unconditionally — this snackbar
       // outlives the route, so an early back press must not strand it.
       progress.close();
+      if (!mounted) return;
+
+      // Templates drop content that does not fit rather than flowing to a
+      // second page, so a long career can lose whole roles. Sending a resume
+      // with a job missing is worse than any delay this dialog costs.
+      if (truncation.hasLoss && !await _confirmTruncatedExport(truncation)) {
+        return;
+      }
+      if (!mounted) return;
+
       final outcome = await PdfExport.share(
         pdfBytes: bytes,
         info: _controller.state.data.personalInfo,
@@ -119,6 +145,35 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     } finally {
       if (mounted) setState(() => _exporting = false);
     }
+  }
+
+  /// Warns that the PDF is missing content, and lets the user decide.
+  ///
+  /// Deliberately not a silent block and not a silent send: the user is the
+  /// only one who knows whether a shorter resume is acceptable, but they
+  /// cannot make that call if nothing tells them content was cut.
+  Future<bool> _confirmTruncatedExport(TruncationReport report) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Some content will be left out'),
+        content: Text(
+          '${report.describe()}\n\n'
+          'Shorten your entries, or pick a design that fits more.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Go back and edit'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Export anyway'),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
   }
 
   void _showExportFailure(ScaffoldMessengerState messenger, String? message) {
