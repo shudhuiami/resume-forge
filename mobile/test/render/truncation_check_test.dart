@@ -73,6 +73,34 @@ void main() {
     expect(report.hasLoss, isFalse);
   });
 
+  group('mightOverflow gate', () {
+    test('skips a resume too small to be at risk', () {
+      // Cheapest possible answer for the common case: no renders at all.
+      expect(TruncationCheck.mightOverflow(const ResumeData()), isFalse);
+      expect(TruncationCheck.mightOverflow(withRoles(1)), isFalse);
+    });
+
+    test('opens the gate before the tightest measured capacity', () {
+      // The tightest design holds 4 roles, so the gate must already be open at
+      // 3 or it would miss a real loss.
+      expect(TruncationCheck.mightOverflow(withRoles(3)), isTrue);
+    });
+
+    test('opens the gate on sheer length even with few entries', () {
+      final wordy = sampleResume.copyWith(
+        experiences: [
+          sampleResume.experiences.first.copyWith(description: 'x' * 2000),
+        ],
+        education: const [],
+        projects: const [],
+        skills: const [],
+        customSections: const [],
+      );
+
+      expect(TruncationCheck.mightOverflow(wordy), isTrue);
+    });
+  });
+
   test('describe() reads as a sentence for one and for several sections', () {
     expect(
       const TruncationReport(['experience']).describe(),

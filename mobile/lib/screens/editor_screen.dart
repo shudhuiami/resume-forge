@@ -266,23 +266,36 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
               ),
             ],
           ),
-          body: TabBarView(
-            controller: _tabs,
+          body: Column(
             children: [
-              _EditorForm(controller: _controller, onPickPhoto: _pickPhoto),
-              Padding(
-                padding: EdgeInsets.all(context.tokens.spaceLg),
-                child: PdfPageView(
-                  pdfBytes: state.pdfBytes,
-                  isRendering: state.isRendering,
-                  buildError: state.renderError,
-                  onRetry: _controller.retryPreview,
-                ),
-              ),
+              // Above the tabs so it is visible whether the user is typing or
+              // looking at the page. Content that never reaches the PDF is not
+              // something to discover at the export dialog.
+              if (state.truncation.hasLoss)
+                _TruncationBanner(report: state.truncation),
+              Expanded(child: _tabViews(state)),
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _tabViews(EditorState state) {
+    return TabBarView(
+      controller: _tabs,
+      children: [
+        _EditorForm(controller: _controller, onPickPhoto: _pickPhoto),
+        Padding(
+          padding: EdgeInsets.all(context.tokens.spaceLg),
+          child: PdfPageView(
+            pdfBytes: state.pdfBytes,
+            isRendering: state.isRendering,
+            buildError: state.renderError,
+            onRetry: _controller.retryPreview,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -916,6 +929,52 @@ class _PhotoRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Tells the user, while they are still editing, that the page cannot hold
+/// everything they have typed.
+///
+/// Uses the error container rather than a warning yellow: content missing from
+/// a resume someone is about to send is a failure, not a hint.
+class _TruncationBanner extends StatelessWidget {
+  const _TruncationBanner({required this.report});
+
+  final TruncationReport report;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tokens = context.tokens;
+
+    return Material(
+      color: theme.colorScheme.errorContainer,
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: tokens.spaceLg,
+          vertical: tokens.spaceMd,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.warning_amber_rounded,
+              size: 20,
+              color: theme.colorScheme.onErrorContainer,
+            ),
+            SizedBox(width: tokens.spaceMd),
+            Expanded(
+              child: Text(
+                report.describe(),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onErrorContainer,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../data/resume_repository.dart';
 import '../models/resume.dart';
 import '../render/preview_engine.dart';
+import '../render/truncation_check.dart';
 import '../templates/registry.dart';
 
 @immutable
@@ -15,6 +16,7 @@ class EditorState {
     this.isRendering = false,
     this.renderError,
     this.hasUnsavedChanges = false,
+    this.truncation = const TruncationReport.none(),
   });
 
   final ResumeDocument doc;
@@ -27,6 +29,10 @@ class EditorState {
   final Object? renderError;
   final bool hasUnsavedChanges;
 
+  /// Sections the current design could not fit on the page. Empty when
+  /// everything the user typed actually reaches the PDF.
+  final TruncationReport truncation;
+
   ResumeData get data => doc.data;
 
   EditorState copyWith({
@@ -35,6 +41,7 @@ class EditorState {
     bool? isRendering,
     Object? renderError = _noChange,
     bool? hasUnsavedChanges,
+    TruncationReport? truncation,
   }) {
     return EditorState(
       doc: doc ?? this.doc,
@@ -44,6 +51,7 @@ class EditorState {
           ? this.renderError
           : renderError,
       hasUnsavedChanges: hasUnsavedChanges ?? this.hasUnsavedChanges,
+      truncation: truncation ?? this.truncation,
     );
   }
 
@@ -57,6 +65,7 @@ class EditorController extends ChangeNotifier {
     required this.repository,
     PreviewEngine? engine,
     this.autosaveDelay = const Duration(milliseconds: 800),
+    this.truncationDelay = const Duration(milliseconds: 900),
   }) : _engine = engine ?? PreviewEngine(),
        _state = EditorState(doc: doc) {
     _sub = _engine.results.listen(
@@ -67,6 +76,7 @@ class EditorController extends ChangeNotifier {
           isRendering: _engine.isBusy,
           renderError: null,
         );
+        _scheduleTruncationCheck();
       },
       onError: (Object error) {
         if (_disposed) return;
@@ -91,6 +101,10 @@ class EditorController extends ChangeNotifier {
 
   final PreviewEngine _engine;
   final Duration autosaveDelay;
+
+  /// How long typing must be quiet before the (render-costly) content check
+  /// runs.
+  final Duration truncationDelay;
 
   StreamSubscription<PreviewResult>? _sub;
   Timer? _autosave;
@@ -164,6 +178,43 @@ class EditorController extends ChangeNotifier {
     }
   }
 
+  Timer? _truncationTimer;
+  int _truncationRun = 0;
+
+  /// Checks for dropped content after the preview settles.
+  ///
+  /// Deliberately lazier than the preview: the check costs a render per
+  /// populated section, so it waits for typing to stop and skips entirely for
+  /// resumes too short to be at risk. The user learns while they are still
+  /// editing rather than at the export dialog, which is the point.
+  void _scheduleTruncationCheck() {
+    _truncationTimer?.cancel();
+    if (!TruncationCheck.mightOverflow(state.data)) {
+      if (state.truncation.hasLoss) {
+        state = state.copyWith(truncation: const TruncationReport.none());
+      }
+      return;
+    }
+    _truncationTimer = Timer(truncationDelay, _runTruncationCheck);
+  }
+
+  Future<void> _runTruncationCheck() async {
+    final run = ++_truncationRun;
+    final data = state.data;
+    try {
+      final report = await TruncationCheck.run(
+        template: templateById(state.doc.templateId),
+        data: data,
+      );
+      // Discard a result the user has already typed past.
+      if (_disposed || run != _truncationRun) return;
+      state = state.copyWith(truncation: report);
+    } catch (_) {
+      // A failed check must not claim content is fine or that it is lost.
+      // Leaving the previous answer in place is the honest fallback.
+    }
+  }
+
   /// Builds the exact bytes to export, bypassing the debounce.
   Future<Uint8List> buildForExport() =>
       _engine.renderNow(state.data, state.doc.templateId);
@@ -171,6 +222,7 @@ class EditorController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _truncationTimer?.cancel();
     _autosave?.cancel();
     unawaited(_sub?.cancel());
     unawaited(_engine.dispose());

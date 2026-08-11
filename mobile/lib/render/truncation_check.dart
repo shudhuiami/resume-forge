@@ -43,6 +43,38 @@ class TruncationReport {
 /// one extra render per section examined, so it belongs on a user-initiated
 /// action such as export rather than on every keystroke.
 abstract final class TruncationCheck {
+  /// Cheap gate before paying for the exact check.
+  ///
+  /// Measured capacity is four roles on the tightest design, so a resume well
+  /// under that cannot be losing anything and should not cost extra renders on
+  /// every edit. Deliberately generous: a false positive costs one check, which
+  /// then answers exactly, whereas a false negative would hide lost content.
+  static bool mightOverflow(ResumeData data) {
+    if (data.experiences.length >= 3) return true;
+    if (data.education.length >= 3) return true;
+    if (data.projects.length >= 3) return true;
+    if (data.skills.length >= 10) return true;
+    if (data.customSections.length >= 2) return true;
+    return _approximateLength(data) > 1200;
+  }
+
+  /// Rough character count of everything that reaches the page.
+  static int _approximateLength(ResumeData data) {
+    var n = data.personalInfo.summary.length;
+    for (final e in data.experiences) {
+      n += e.description.length + e.company.length + e.position.length;
+    }
+    for (final p in data.projects) {
+      n += p.description.length + p.name.length;
+    }
+    for (final s in data.customSections) {
+      for (final i in s.items) {
+        n += i.title.length + i.subtitle.length + i.description.length;
+      }
+    }
+    return n;
+  }
+
   static Future<TruncationReport> run({
     required ResumeTemplate template,
     required ResumeData data,
