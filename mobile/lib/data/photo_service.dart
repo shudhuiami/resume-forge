@@ -84,7 +84,17 @@ class PhotoService {
     int maxEdge = maxEdge,
     int quality = jpegQuality,
   }) {
-    final decoded = img.decodeImage(raw);
+    // package:image does not merely return null on bad input — its format
+    // probes index past the end of a short or truncated buffer and throw
+    // RangeError. Without this catch the null branch below is dead for exactly
+    // the corrupt input it exists to handle, and a half-written photo file
+    // escapes as an uncaught exception to every caller.
+    final img.Image? decoded;
+    try {
+      decoded = img.decodeImage(raw);
+    } catch (_) {
+      return null;
+    }
     if (decoded == null) return null;
 
     // Centre-crop to a square first. Templates render the portrait in a circle

@@ -83,8 +83,14 @@ class PreviewEngine {
   ///
   /// Used for export and for the first paint, where waiting out the debounce
   /// would show an empty page for no reason.
+  ///
+  /// Deliberately does **not** cancel a queued preview render. Cancelling it
+  /// looked like a saving — the export is rendering the same content anyway —
+  /// but it stranded the caller: an edit followed by an export inside the
+  /// debounce window dropped the queued render, so the editor kept stale bytes
+  /// and stayed `isRendering` forever, showing a spinner that never resolved.
+  /// A duplicate render costs far less than a stuck preview.
   Future<Uint8List> renderNow(ResumeData data, String templateId) async {
-    _timer?.cancel();
     final job = await _buildJob(data, templateId);
     return _runner(job);
   }
