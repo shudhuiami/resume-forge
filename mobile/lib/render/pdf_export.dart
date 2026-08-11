@@ -72,7 +72,7 @@ abstract final class PdfExport {
           ? const ExportOutcome.shared()
           : const ExportOutcome.dismissed();
     } catch (error) {
-      return ExportOutcome.failed(_describe(error));
+      return ExportOutcome.failed(describeFailure(error));
     }
   }
 
@@ -94,20 +94,26 @@ abstract final class PdfExport {
           ? const ExportOutcome.shared()
           : const ExportOutcome.dismissed();
     } catch (error) {
-      return ExportOutcome.failed(_describe(error));
+      return ExportOutcome.failed(describeFailure(error));
     }
   }
 
   /// Turns platform exceptions into something a user can act on.
-  static String _describe(Object error) {
+  ///
+  /// Every branch names the obstacle and the move that clears it; "an error
+  /// occurred" leaves the user with a dead end and a PDF they still want.
+  static String describeFailure(Object error) {
     final text = error.toString().toLowerCase();
     if (text.contains('permission')) {
       return 'Storage permission is required to save the PDF. '
-          'Grant it in Settings and try again.';
+          'Grant it in Settings, then try again.';
     }
     if (text.contains('space') || text.contains('enospc')) {
-      return 'Not enough storage space to save the PDF.';
+      return 'Not enough storage space to save the PDF. '
+          'Free up some space and try again.';
     }
-    return 'Could not export the PDF. Please try again.';
+    // Anything else is genuinely undiagnosable from here. Say so plainly and
+    // let the caller offer a retry rather than inventing a cause.
+    return 'Could not export the PDF.';
   }
 }

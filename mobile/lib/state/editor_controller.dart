@@ -129,6 +129,17 @@ class EditorController extends ChangeNotifier {
     _armAutosave();
   }
 
+  /// Re-runs the preview after a failed render.
+  ///
+  /// Without this the only way out of a render error was to type something
+  /// else, because [updateData] and [setTemplate] both no-op when nothing
+  /// changed — leaving the preview's Retry affordance with nothing to call.
+  void retryPreview() {
+    if (_disposed) return;
+    state = state.copyWith(isRendering: true, renderError: null);
+    _requestPreview();
+  }
+
   void _requestPreview() => _engine.request(state.data, state.doc.templateId);
 
   void _armAutosave() {

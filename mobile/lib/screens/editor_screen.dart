@@ -61,32 +61,70 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     super.dispose();
   }
 
+  /// True from the tap until the share sheet has been offered. Keeps the
+  /// action from being fired twice, which would build the document twice and
+  /// stack two share sheets.
+  bool _exporting = false;
+
   Future<void> _export() async {
+    if (_exporting) return;
     final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(
-      const SnackBar(
-        content: Text('Preparing PDF…'),
-        duration: Duration(seconds: 1),
+    setState(() => _exporting = true);
+
+    // Held open for exactly as long as the work takes. A fixed one-second
+    // snackbar was wrong in both directions: it vanished mid-build on a slow
+    // render, leaving the app looking idle, and it lingered over the share
+    // sheet on a fast one.
+    final progress = messenger.showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: context.tokens.spaceMd),
+            const Expanded(child: Text('Preparing PDF…')),
+          ],
+        ),
+        duration: const Duration(minutes: 1),
       ),
     );
+
     try {
       final bytes = await _controller.buildForExport();
+      // Closed before the sheet opens, and unconditionally — this snackbar
+      // outlives the route, so an early back press must not strand it.
+      progress.close();
       final outcome = await PdfExport.share(
         pdfBytes: bytes,
         info: _controller.state.data.personalInfo,
       );
       if (!mounted) return;
+      // A dismissed share sheet is the user changing their mind, not a
+      // failure, and says nothing.
       if (outcome.isFailure) {
-        messenger.showSnackBar(
-          SnackBar(content: Text(outcome.message ?? 'Export failed')),
-        );
+        _showExportFailure(messenger, outcome.message);
       }
     } catch (_) {
+      progress.close();
       if (!mounted) return;
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Could not export the PDF.')),
-      );
+      _showExportFailure(messenger, 'Could not prepare the PDF for export.');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
     }
+  }
+
+  void _showExportFailure(ScaffoldMessengerState messenger, String? message) {
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message ?? 'Could not export the PDF.'),
+        // Long enough to read a two-line explanation and reach the action.
+        duration: const Duration(seconds: 8),
+        action: SnackBarAction(label: 'Try again', onPressed: _export),
+      ),
+    );
   }
 
   /// Swaps the design without touching content — the product's core promise,
@@ -156,8 +194,14 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                 tooltip: 'Change design',
               ),
               IconButton(
-                onPressed: _export,
-                icon: const Icon(Icons.ios_share),
+                onPressed: _exporting ? null : _export,
+                icon: _exporting
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.ios_share),
                 tooltip: 'Export PDF',
               ),
             ],
@@ -172,6 +216,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                   pdfBytes: state.pdfBytes,
                   isRendering: state.isRendering,
                   buildError: state.renderError,
+                  onRetry: _controller.retryPreview,
                 ),
               ),
             ],

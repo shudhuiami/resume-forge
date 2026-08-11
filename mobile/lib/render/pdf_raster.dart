@@ -21,6 +21,13 @@ abstract final class PdfRaster {
   static const maxPixelWidth = 2400.0;
   static const minPixelWidth = 200.0;
 
+  /// Width / height of the page these rasters come out of.
+  ///
+  /// Single source of truth for the preview frame's shape: derived from the
+  /// real page format rather than from a rounded 1/1.4142, so the widget that
+  /// holds the image and the image itself cannot disagree.
+  static final pageAspect = a4.width / a4.height;
+
   /// DPI needed to rasterize an A4 page to [logicalWidth] * [pixelRatio]
   /// pixels wide.
   static double dpiForWidth(double logicalWidth, double pixelRatio) {
