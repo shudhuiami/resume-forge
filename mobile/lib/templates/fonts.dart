@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/widgets.dart' as pw;
 
@@ -28,6 +30,24 @@ class LoadedFamily {
   pw.Font get semiBold => semiBoldOrNull ?? bold;
 }
 
+/// Raw TTF bytes for one family, in a form that crosses an isolate boundary.
+class FamilyBytes {
+  const FamilyBytes({required this.regular, required this.bold, this.semiBold});
+
+  final Uint8List regular;
+  final Uint8List bold;
+  final Uint8List? semiBold;
+
+  /// Parses these bytes into usable fonts. Safe to call inside an isolate.
+  LoadedFamily parse() => LoadedFamily(
+    regular: pw.Font.ttf(regular.buffer.asByteData()),
+    bold: pw.Font.ttf(bold.buffer.asByteData()),
+    semiBoldOrNull: semiBold == null
+        ? null
+        : pw.Font.ttf(semiBold!.buffer.asByteData()),
+  );
+}
+
 /// Loads and caches the bundled PDF fonts.
 ///
 /// Families are loaded on demand rather than all at once: a template that uses
@@ -56,11 +76,44 @@ abstract final class ResumeFonts {
     ),
   };
 
+  static final Map<FontFamily, FamilyBytes> _byteCache = {};
+
   /// Synchronously returns an already-loaded family, or null.
   ///
   /// Template builders run inside an isolate where async loading is not
   /// available, so fonts must be resolved via [load] before building.
   static LoadedFamily? peek(FontFamily family) => _cache[family];
+
+  /// Raw TTF bytes for [families], cached after first read.
+  ///
+  /// A background render needs bytes rather than [LoadedFamily]: a parsed
+  /// `pw.Font` is not something we want to push across an isolate boundary,
+  /// whereas `Uint8List` copies cleanly. The isolate re-parses on arrival —
+  /// cheap next to the debounce interval, and it keeps the boundary simple.
+  static Future<Map<FontFamily, FamilyBytes>> loadBytes(
+    Set<FontFamily> families,
+  ) async {
+    final result = <FontFamily, FamilyBytes>{};
+    for (final family in families) {
+      final cached = _byteCache[family];
+      if (cached != null) {
+        result[family] = cached;
+        continue;
+      }
+      final paths = _assets[family]!;
+      final semiBoldPath = paths.semiBold;
+      final bytes = FamilyBytes(
+        regular: (await rootBundle.load(paths.regular)).buffer.asUint8List(),
+        bold: (await rootBundle.load(paths.bold)).buffer.asUint8List(),
+        semiBold: semiBoldPath == null
+            ? null
+            : (await rootBundle.load(semiBoldPath)).buffer.asUint8List(),
+      );
+      _byteCache[family] = bytes;
+      result[family] = bytes;
+    }
+    return result;
+  }
 
   static Future<LoadedFamily> load(FontFamily family) {
     final cached = _cache[family];
@@ -97,5 +150,6 @@ abstract final class ResumeFonts {
   static void resetForTest() {
     _cache.clear();
     _inFlight.clear();
+    _byteCache.clear();
   }
 }
