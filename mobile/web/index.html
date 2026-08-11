@@ -31,6 +31,17 @@
 
   <title>resume_forge</title>
   <link rel="manifest" href="manifest.json">
+  <!-- Vendored pdf.js.
+       The printing package rasterizes PDFs on web via pdf.js and otherwise
+       injects it from a public CDN at runtime. Loading it locally keeps the
+       app self-contained and working offline, which is the whole premise of a
+       no-backend resume builder. Native builds use PDFium and ignore this. -->
+  <script src="pdfjs/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdfjs/pdf.worker.min.js';
+    }
+  </script>
 </head>
 <body>
   <!--

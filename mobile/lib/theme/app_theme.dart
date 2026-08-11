@@ -13,6 +13,9 @@ import 'tokens.dart';
 abstract final class AppTheme {
   /// Deep near-black with a violet cast, so large dark areas read as
   /// deliberate rather than as an unstyled background.
+  /// Bundled UI typeface. See `assets/fonts` and the pubspec `fonts:` block.
+  static const uiFontFamily = 'Inter';
+
   static const _bg = Color(0xFF0B0A12);
   static const _surface = Color(0xFF15131F);
   static const _surfaceHigh = Color(0xFF1E1B2C);
@@ -89,6 +92,10 @@ abstract final class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: colorScheme.surface,
+      // Bundled, not downloaded. Material's default Roboto is fetched from a
+      // CDN on web, which blocks first paint when the network is unavailable
+      // and is a dependency this app has no reason to carry.
+      fontFamily: uiFontFamily,
     );
 
     return base.copyWith(
@@ -126,7 +133,14 @@ abstract final class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(tokens.radiusMd),
           ),
-          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+          // The family must be named explicitly. A bare TextStyle here drops
+          // ThemeData.fontFamily and falls back to Roboto — the wrong typeface
+          // on device, and invisible text on web where Roboto is not bundled.
+          textStyle: const TextStyle(
+            fontFamily: uiFontFamily,
+            fontWeight: FontWeight.w600,
+            fontSize: 15,
+          ),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
