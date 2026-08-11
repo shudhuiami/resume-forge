@@ -121,6 +121,22 @@ pw.MemoryImage? tryDecodePhoto(Uint8List? bytes) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// ENGINE HAZARD: a `pw.Column` DROPS A CHILD ENTIRELY when that child's height
+// exceeds the space remaining — it does not clip it and does not overflow
+// visibly.
+//
+// This is the most dangerous layout behaviour in dart_pdf because the failure
+// is silent: a long resume simply loses its experience section, the PDF still
+// parses, the page count is still one, and every test passes. It has already
+// erased a whole template body once and a Competencies section twice.
+//
+// Defend against it by giving long content a bounded height — put the body in
+// an `Expanded`, or cap it — so overflow trims one entry at a time instead of
+// deleting the container. Always confirm with `pdftotext` that every section
+// still appears, not merely that the document renders.
+// ---------------------------------------------------------------------------
+
 /// Fully rounded ("pill") radius for a box of [height].
 ///
 /// **Never write `pw.BorderRadius.circular(999)`.** Flutter clamps an oversized

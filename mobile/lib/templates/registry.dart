@@ -1,8 +1,16 @@
 import 'aurora/aurora_template.dart';
 import 'beacon/beacon_template.dart';
+import 'circuit/circuit_template.dart';
 import 'compass/compass_template.dart';
+import 'coral/coral_template.dart';
+import 'ember/ember_template.dart';
 import 'ledger/ledger_template.dart';
+import 'linen/linen_template.dart';
 import 'meridian/meridian_template.dart';
+import 'orchid/orchid_template.dart';
+import 'prism/prism_template.dart';
+import 'quill/quill_template.dart';
+import 'terminal/terminal_template.dart';
 import 'template.dart';
 
 /// Every design in the catalog.
@@ -16,6 +24,14 @@ const List<ResumeTemplate> resumeTemplates = <ResumeTemplate>[
   BeaconTemplate(),
   LedgerTemplate(),
   CompassTemplate(),
+  CircuitTemplate(),
+  TerminalTemplate(),
+  QuillTemplate(),
+  LinenTemplate(),
+  CoralTemplate(),
+  OrchidTemplate(),
+  PrismTemplate(),
+  EmberTemplate(),
 ];
 
 /// The design a new resume starts on.
