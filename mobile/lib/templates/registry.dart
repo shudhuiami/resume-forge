@@ -1,4 +1,8 @@
 import 'aurora/aurora_template.dart';
+import 'beacon/beacon_template.dart';
+import 'compass/compass_template.dart';
+import 'ledger/ledger_template.dart';
+import 'meridian/meridian_template.dart';
 import 'template.dart';
 
 /// Every design in the catalog.
@@ -6,7 +10,13 @@ import 'template.dart';
 /// The single spine of the template system: the gallery, the editor, and the
 /// exporter all read from this list, so adding a design is one new file plus
 /// one entry here.
-const List<ResumeTemplate> resumeTemplates = <ResumeTemplate>[AuroraTemplate()];
+const List<ResumeTemplate> resumeTemplates = <ResumeTemplate>[
+  AuroraTemplate(),
+  MeridianTemplate(),
+  BeaconTemplate(),
+  LedgerTemplate(),
+  CompassTemplate(),
+];
 
 /// The design a new resume starts on.
 ResumeTemplate get defaultTemplate => resumeTemplates.first;
