@@ -201,6 +201,9 @@ class _EditorForm extends StatelessWidget {
     final info = data.personalInfo;
 
     return ListView(
+      // Addressable so tests can scroll this list rather than the TabBarView's
+      // own PageView, which is the first Scrollable in the tree.
+      key: const Key('editor-form-list'),
       // Room for the keyboard plus the last field, so the bottom entry is not
       // pinned under the keyboard when it opens.
       padding: EdgeInsets.fromLTRB(
