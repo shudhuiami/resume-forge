@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,6 +10,14 @@ import '../templates/registry.dart';
 import '../theme/tokens.dart';
 import 'editor_screen.dart';
 import 'gallery_screen.dart';
+
+/// Widest the list is allowed to grow. A tablet-width row puts a resume title
+/// and its delete button half a screen apart and reads as an admin table, so
+/// the content column stops here and centres.
+const _maxContentWidth = 640.0;
+
+/// Widest a paragraph of body copy is allowed to run, in the same spirit.
+const _maxProseWidth = 380.0;
 
 /// Home: everything the user has saved.
 class ResumeListScreen extends ConsumerWidget {
@@ -83,40 +93,54 @@ class ResumeListScreen extends ConsumerWidget {
     final resumes = ref.watch(resumeListProvider);
     final tokens = context.tokens;
 
+    // The empty state carries its own primary action, so the FAB would be a
+    // second identical call to action on the same screen.
+    final showFab = resumes.valueOrNull?.isNotEmpty ?? true;
+
     return Scaffold(
       appBar: AppBar(title: const Text('ResumeForge')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _createNew(context, ref),
-        icon: const Icon(Icons.add),
-        label: const Text('New resume'),
-      ),
+      floatingActionButton: showFab
+          ? FloatingActionButton.extended(
+              onPressed: () => _createNew(context, ref),
+              icon: const Icon(Icons.add),
+              label: const Text('New resume'),
+            )
+          : null,
       body: SafeArea(
-        child: resumes.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, _) =>
-              _ErrorState(onRetry: () => ref.invalidate(resumeListProvider)),
-          data: (docs) {
-            if (docs.isEmpty) {
-              return _EmptyState(onCreate: () => _createNew(context, ref));
-            }
-            return ListView.builder(
-              padding: EdgeInsets.fromLTRB(
-                tokens.spaceLg,
-                tokens.spaceSm,
-                tokens.spaceLg,
-                tokens.spaceXxl * 2.5,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _maxContentWidth),
+            child: resumes.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (error, _) => _ErrorState(
+                onRetry: () => ref.invalidate(resumeListProvider),
               ),
-              itemCount: docs.length,
-              itemBuilder: (context, index) {
-                final doc = docs[index];
-                return _ResumeTile(
-                  doc: doc,
-                  onTap: () => _open(context, ref, doc),
-                  onDelete: () => _confirmDelete(context, ref, doc),
+              data: (docs) {
+                if (docs.isEmpty) {
+                  return _EmptyState(onCreate: () => _createNew(context, ref));
+                }
+                return ListView.builder(
+                  padding: EdgeInsets.fromLTRB(
+                    tokens.spaceLg,
+                    tokens.spaceSm,
+                    tokens.spaceLg,
+                    // Clearance for the extended FAB, so the last card is not
+                    // parked underneath it.
+                    tokens.spaceXxl * 2.5,
+                  ),
+                  itemCount: docs.length,
+                  itemBuilder: (context, index) {
+                    final doc = docs[index];
+                    return _ResumeTile(
+                      doc: doc,
+                      onTap: () => _open(context, ref, doc),
+                      onDelete: () => _confirmDelete(context, ref, doc),
+                    );
+                  },
                 );
               },
-            );
-          },
+            ),
+          ),
         ),
       ),
     );
@@ -155,7 +179,7 @@ class _ResumeTile extends StatelessWidget {
           style: theme.textTheme.titleMedium,
         ),
         subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4),
+          padding: EdgeInsets.only(top: tokens.spaceXs),
           child: Text(
             '${template.name} · edited ${_relative(doc.updatedAt)}',
             maxLines: 1,
@@ -184,6 +208,38 @@ class _ResumeTile extends StatelessWidget {
   }
 }
 
+/// Centred full-screen message that survives a short viewport.
+///
+/// Landscape phones and large accessibility text both shrink the space below
+/// the app bar past what an icon-plus-copy-plus-button stack needs, so the
+/// stack scrolls instead of overflowing, and still centres when it fits.
+class _MessagePane extends StatelessWidget {
+  const _MessagePane({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final inset = tokens.spaceXl;
+        return SingleChildScrollView(
+          padding: EdgeInsets.all(inset),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: math.max(0, constraints.maxHeight - inset * 2),
+            ),
+            child: Center(
+              child: Column(mainAxisSize: MainAxisSize.min, children: children),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _EmptyState extends StatelessWidget {
   const _EmptyState({required this.onCreate});
 
@@ -192,37 +248,35 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.description_outlined,
-              size: 56,
-              color: theme.colorScheme.primary,
-            ),
-            const SizedBox(height: 16),
-            Text('No resumes yet', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 8),
-            Text(
-              'Pick a design, fill in your details, and export a PDF. '
-              'Everything stays on this device.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: onCreate,
-              icon: const Icon(Icons.add),
-              label: const Text('Create your first resume'),
-            ),
-          ],
+    final tokens = context.tokens;
+    return _MessagePane(
+      children: [
+        Icon(
+          Icons.description_outlined,
+          size: 56,
+          color: theme.colorScheme.primary,
         ),
-      ),
+        SizedBox(height: tokens.spaceLg),
+        Text('No resumes yet', style: theme.textTheme.titleLarge),
+        SizedBox(height: tokens.spaceSm),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: _maxProseWidth),
+          child: Text(
+            'Pick a design, fill in your details, and export a PDF. '
+            'Everything stays on this device.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        SizedBox(height: tokens.spaceXl),
+        FilledButton.icon(
+          onPressed: onCreate,
+          icon: const Icon(Icons.add),
+          label: const Text('Create your first resume'),
+        ),
+      ],
     );
   }
 }
@@ -235,24 +289,22 @@ class _ErrorState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.error_outline, size: 48, color: theme.colorScheme.error),
-            const SizedBox(height: 12),
-            Text(
-              'Could not load your saved resumes',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium,
-            ),
-            const SizedBox(height: 16),
-            FilledButton(onPressed: onRetry, child: const Text('Try again')),
-          ],
+    final tokens = context.tokens;
+    return _MessagePane(
+      children: [
+        Icon(Icons.error_outline, size: 48, color: theme.colorScheme.error),
+        SizedBox(height: tokens.spaceMd),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: _maxProseWidth),
+          child: Text(
+            'Could not load your saved resumes',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleMedium,
+          ),
         ),
-      ),
+        SizedBox(height: tokens.spaceLg),
+        FilledButton(onPressed: onRetry, child: const Text('Try again')),
+      ],
     );
   }
 }
