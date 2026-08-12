@@ -1,9 +1,13 @@
-import 'dart:typed_data';
-
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
 /// Result of asking the user for a photo.
+///
+/// Deliberately four values and no more. A device with no camera is a
+/// [PhotoPickStatus.failed] carrying its own explanation rather than a fifth
+/// status: callers already switch exhaustively over this enum, and a new value
+/// would break every one of them to say something the message already says.
 enum PhotoPickStatus { picked, cancelled, denied, failed }
 
 class PhotoPickResult {
@@ -35,6 +39,21 @@ class PhotoService {
   /// here and roughly halves the payload versus 95.
   static const jpegQuality = 85;
 
+  /// Whether this platform can capture a photo at all.
+  ///
+  /// Answers "is the camera affordance worth showing", not "does this handset
+  /// have a working lens" — no platform reports the latter without launching
+  /// the camera first, which is why [pick] still has to handle a capture that
+  /// finds no camera to hand off to.
+  bool get supportsCamera => _picker.supportsImageSource(ImageSource.camera);
+
+  /// Takes a portrait with the camera.
+  Future<PhotoPickResult> pickFromCamera() => pick(source: ImageSource.camera);
+
+  /// Chooses an existing portrait from the photo library.
+  Future<PhotoPickResult> pickFromGallery() =>
+      pick(source: ImageSource.gallery);
+
   Future<PhotoPickResult> pick({
     ImageSource source = ImageSource.gallery,
   }) async {
@@ -59,20 +78,70 @@ class PhotoService {
       }
       return PhotoPickResult(PhotoPickStatus.picked, bytes: processed);
     } catch (error) {
-      final text = error.toString().toLowerCase();
-      if (text.contains('permission') || text.contains('denied')) {
-        return const PhotoPickResult(
-          PhotoPickStatus.denied,
-          message:
-              'Photo access is required. Grant it in Settings to add a '
-              'portrait.',
-        );
-      }
+      return _describeFailure(error, source);
+    }
+  }
+
+  /// Turns a picker exception into a result the UI can render.
+  ///
+  /// Nothing here rethrows. Every path out of the camera — no hardware, no
+  /// camera app installed, a refused permission, a second tap while the first
+  /// sheet is still up — is a normal thing for a user to run into, and each one
+  /// needs a sentence that says what happened and what to do instead.
+  static PhotoPickResult _describeFailure(Object error, ImageSource source) {
+    final code = error is PlatformException ? error.code : '';
+    final text = '$code $error'.toLowerCase();
+    final fromCamera = source == ImageSource.camera;
+
+    // No camera app to hand the capture to (image_picker's `no_available_camera`
+    // from an ActivityNotFoundException), or a platform whose image_picker
+    // implementation has no camera delegate at all. Neither is retryable and
+    // neither is about permissions, so the message must point at the gallery
+    // rather than at Settings.
+    if (text.contains('no_available_camera') ||
+        text.contains('cameradelegate')) {
       return const PhotoPickResult(
         PhotoPickStatus.failed,
-        message: 'Could not open your photos. Please try again.',
+        message:
+            'No camera is available on this device. Choose an existing photo '
+            'instead.',
       );
     }
+
+    // The picker is single-flight; a second request while a sheet is open is a
+    // double tap, not a broken app.
+    if (text.contains('already_active')) {
+      return const PhotoPickResult(
+        PhotoPickStatus.failed,
+        message:
+            'A photo request is already open. Finish with it, then try '
+            'again.',
+      );
+    }
+
+    // Refused, or blocked by parental controls (`*_access_restricted`). Both
+    // land the user in the same place, and the wording has to name the right
+    // switch — telling someone to grant photo access when they refused the
+    // camera sends them to a setting that changes nothing.
+    if (text.contains('permission') ||
+        text.contains('denied') ||
+        text.contains('restricted')) {
+      return PhotoPickResult(
+        PhotoPickStatus.denied,
+        message: fromCamera
+            ? 'Camera access is required. Grant it in Settings to take a '
+                  'portrait.'
+            : 'Photo access is required. Grant it in Settings to add a '
+                  'portrait.',
+      );
+    }
+
+    return PhotoPickResult(
+      PhotoPickStatus.failed,
+      message: fromCamera
+          ? 'Could not open the camera. Please try again.'
+          : 'Could not open your photos. Please try again.',
+    );
   }
 
   /// Decodes, squares, and downscales [raw]; returns null if undecodable.

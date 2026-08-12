@@ -1,0 +1,49 @@
+# Native splash generation — the frame the OS paints before Flutter has booted.
+#
+# Regenerate with `dart run flutter_native_splash:create`. The output lives in
+# android/app/src/main/res and ios/Runner and is checked in.
+#
+# **The colour is the contract.** This screen's only job is to hand off to
+# lib/screens/splash_screen.dart without a visible change of background, so
+# every colour below is AppTheme.colorScheme.surface (#0E0E10 — the matte base)
+# and nothing else. Light and dark are identical because the app itself is dark
+# in both — see the themeMode note in lib/main.dart.
+# test/brand/brand_assets_test.dart reads this file and fails if any of these
+# drift from the Dart value.
+flutter_native_splash:
+  color: "#0E0E10"
+  color_dark: "#0E0E10"
+
+  # The mark's *first frame*: the page with no content bars and no mat. The
+  # Flutter splash opens on exactly this drawing and then writes the bars in
+  # and grows the mat behind it, so nothing visible changes hands — where a
+  # full logo here would mean the mark appeared, vanished for a beat, and
+  # animated back. 640px source, which this package treats as the 4x asset, so
+  # the page lands at 144dp: the size the Flutter splash's opening frame draws
+  # it at on a 390dp-wide phone.
+  image: assets/brand/splash_logo.png
+  image_dark: assets/brand/splash_logo.png
+
+  android: true
+  ios: true
+  # Skipped on purpose: the web splash writes into web/index.html and web/,
+  # which is outside this task's scope.
+  web: false
+
+  android_gravity: center
+  ios_content_mode: center
+  # The status bar stays visible so the splash does not resize the window on
+  # its way out.
+  fullscreen: false
+
+  # Android 12+ uses the platform SplashScreen API, which ignores everything
+  # above. Same colour again, and a 1152px icon whose page lands at the same
+  # 144dp inside the 192dp circle the platform masks to. No
+  # icon_background_color: the mark is already high-contrast on the window
+  # colour, and adding one would switch the platform to the smaller 960/640
+  # icon geometry.
+  android_12:
+    color: "#0E0E10"
+    color_dark: "#0E0E10"
+    image: assets/brand/splash_android12.png
+    image_dark: assets/brand/splash_android12.png

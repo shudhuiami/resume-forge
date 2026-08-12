@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- AppTheme.colorScheme.surface. The one Android-side copy of the app's
+         base colour, referenced by NormalTheme in values/ and values-night/ so
+         the window behind the Flutter view is never a different colour from the
+         Flutter splash that paints on top of it.
+
+         Kept out of styles.xml deliberately: `flutter_native_splash:create`
+         rewrites the LaunchTheme blocks in those files, and a colour defined
+         here survives regeneration. Mirrors flutter_native_splash.yaml, and is
+         checked against the Dart value by test/brand/brand_assets_test.dart. -->
+    <color name="window_background">#0E0E10</color>
+</resources>

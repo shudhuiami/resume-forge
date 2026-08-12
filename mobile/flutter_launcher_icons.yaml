@@ -1,0 +1,50 @@
+# Launcher icon generation.
+#
+# Regenerate the source PNGs with `python assets/brand/generate_brand.py`, then
+# the platform assets with `dart run flutter_launcher_icons`. Both are checked
+# in — nothing here runs as part of a normal build.
+#
+# The palette baked into those PNGs is documented at the top of
+# assets/brand/generate_brand.py and guarded by test/brand/brand_assets_test.dart.
+flutter_launcher_icons:
+  # Opaque master: backdrop plus the mark at 60% of the canvas. Used for the
+  # legacy square/round Android mipmaps and for every iOS size.
+  image_path: "assets/brand/icon_master.png"
+
+  android: "ic_launcher"
+  ios: true
+
+  # Android adaptive icon. The foreground keeps the mark inside the guaranteed
+  # 66%-of-canvas safe circle, so no launcher mask can clip the page corners;
+  # the backdrop is the flat matte base, so there is nothing in it a mask could
+  # crop badly — verified under circle, squircle, rounded-square and full-square
+  # masks at 48px.
+  adaptive_icon_background: "assets/brand/icon_background.png"
+  adaptive_icon_foreground: "assets/brand/icon_foreground.png"
+  # This package otherwise wraps the foreground and monochrome drawables in a
+  # 16% <inset>, on the assumption that the supplied art is full-bleed and needs
+  # pushing into the safe zone. Ours already is in the safe zone, so a second
+  # inset would shrink the page to a third of the layer and leave the icon
+  # looking lost inside its own mask.
+  adaptive_icon_foreground_inset: 0
+  # Android 13 themed icons: a flat silhouette of the same mark, holes and all,
+  # which the system recolours to the user's wallpaper palette.
+  adaptive_icon_monochrome: "assets/brand/icon_monochrome.png"
+
+  # Stated rather than parsed: android/app/build.gradle.kts sets
+  # `minSdk = flutter.minSdkVersion`, which this package's gradle scraper reads
+  # as an empty number and then guesses at.
+  min_sdk_android: 24
+
+  # An iOS app icon may not carry an alpha channel. The master is already
+  # opaque; this is the belt to that braces.
+  remove_alpha_ios: true
+
+  # Not shipped by this project, and generating them would write outside the
+  # android/ and ios/ trees this task owns.
+  web:
+    generate: false
+  windows:
+    generate: false
+  macos:
+    generate: false

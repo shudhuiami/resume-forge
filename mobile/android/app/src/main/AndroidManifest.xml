@@ -1,6 +1,24 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- No <uses-permission> is declared here on purpose, and adding one would
+         make the app worse rather than safer:
+
+         * CAMERA — image_picker takes stills through MediaStore.ACTION_IMAGE_CAPTURE,
+           which hands off to the installed camera app and needs no permission of
+           ours. Worse, ImagePickerUtils.needRequestCameraPermission() checks the
+           *manifest*, so declaring CAMERA makes image_picker start demanding a
+           runtime grant it does not otherwise need, and Play infers
+           <uses-feature android:name="android.hardware.camera" android:required="true">
+           from the permission, filtering the app off camera-less devices.
+         * READ/WRITE_EXTERNAL_STORAGE and READ_MEDIA_IMAGES — reading a photo goes
+           through the system photo picker and saving a PDF goes through the Storage
+           Access Framework (flutter_file_dialog -> ACTION_CREATE_DOCUMENT). Both hand
+           back a URI the user chose; broad storage access is exactly what they exist
+           to avoid.
+
+         No <queries> entry is needed either: the plugins launch their intents with
+         startActivityForResult rather than resolving them first. -->
     <application
-        android:label="resume_forge"
+        android:label="ResumeForge"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

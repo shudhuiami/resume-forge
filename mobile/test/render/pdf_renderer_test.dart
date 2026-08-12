@@ -52,7 +52,14 @@ void main() {
     });
 
     test('renders without a photo', () async {
-      final bytes = await render(sampleResume);
+      // Explicitly cleared. The sample fixture now ships a portrait — it is
+      // what the gallery thumbnails advertise — so `sampleResume` alone no
+      // longer exercises the no-photo path Aurora has to lay out for.
+      final bytes = await render(
+        sampleResume.copyWith(
+          personalInfo: sampleResume.personalInfo.copyWith(photo: null),
+        ),
+      );
       expect(bytes.length, greaterThan(1000));
     });
 

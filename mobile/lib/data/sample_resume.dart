@@ -1,12 +1,24 @@
 import '../models/resume.dart';
+import 'sample_portrait.dart';
 
 /// Realistic filler used for template thumbnails, the gallery, and tests.
 ///
 /// Deliberately contains awkward content — a long summary, a long company name,
 /// five skills, a two-line project description — so template layouts are
 /// exercised against realistic text rather than short happy-path strings.
+///
+/// It also carries a portrait, for the same reason it carries an awkwardly long
+/// company name: eight of the thirteen designs reserve a photo slot, and a
+/// fixture with no photo made every one of them advertise itself with that slot
+/// empty or collapsed — a thumbnail of a *worse* design than the one the user
+/// would actually get. The portrait is drawn rather than photographed; see
+/// `sample_portrait.dart`.
+///
+/// The five designs that ignore a photo — Ledger, Linen, Orchid, Quill,
+/// Terminal — are unaffected by it, deliberately: three of them say in their own
+/// doc comments that a photograph is not part of the design.
 final sampleResume = ResumeData(
-  personalInfo: const PersonalInfo(
+  personalInfo: PersonalInfo(
     fullName: 'Amara Okonkwo',
     title: 'Senior Product Designer',
     email: 'amara.okonkwo@example.com',
@@ -19,6 +31,7 @@ final sampleResume = ResumeData(
         'artefacts.',
     linkedin: 'linkedin.com/in/amaraokonkwo',
     website: 'amara.design',
+    photo: samplePortraitJpeg,
   ),
   experiences: const [
     Experience(

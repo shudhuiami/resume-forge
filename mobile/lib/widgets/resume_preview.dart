@@ -15,7 +15,30 @@ import '../theme/tokens.dart';
 /// The page is white because it is a document, not app chrome. Everything
 /// drawn *on top* of it — progress, errors, the stale warning — is app chrome
 /// and therefore takes its colours from the theme, which keeps those overlays
-/// legible on white without inventing a second palette.
+/// legible on white without inventing a second palette. On a dark palette that
+/// means the overlays reach for the theme's *deepest* surface. Not
+/// `inverseSurface`: in a dark scheme that slot is a light surface, so carrying
+/// the old inverted treatment across would have painted a pale chip on pale
+/// paper, which is not an overlay but a disappearance.
+///
+/// Re-measured for matte black rather than assumed to carry over, because this
+/// is the widest colour jump in the app and it got wider: base to paper is
+/// 19.4:1 here against the indigo palette's 13.4:1. The overlays gained from it
+/// — the busy pill now sits at 20.01:1 on the page and the stale banner at
+/// 15.43:1 — and the page's own edge is what needed the attention. See the mat
+/// ring below.
+///
+/// The page is a **square-cornered rectangle**, and deliberately the only
+/// surface in the app that is. Everything else here is app chrome and takes
+/// `radiusSm`; this is a sheet of A4, and paper does not have rounded corners.
+/// Rounding it was not only wrong as a picture of the printout — the clip
+/// *removed* what the templates draw there. Measured off the rendered pages:
+/// nine of the thirteen designs ink at least one page corner with a banner,
+/// sidebar or full-bleed surface, and three of those — Terminal, Prism, Ember —
+/// fill all four, so the arc was cutting a wedge out of the design at the one
+/// place in the app whose whole promise is that what you see is what prints.
+/// On Terminal, whose page is near-black, that wedge was the app's own
+/// background showing through the paper.
 class ResumePreview extends StatelessWidget {
   const ResumePreview({
     super.key,
@@ -47,7 +70,7 @@ class ResumePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
     final tokens = context.tokens;
     final hasFrame = pngBytes != null;
 
@@ -57,18 +80,32 @@ class ResumePreview extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             // The page itself is white regardless of app theme — it is a
-            // document, not app chrome.
+            // document, not app chrome. The one hard-coded colour outside
+            // `theme/`, and the only one there is a reason for.
             color: Colors.white,
-            borderRadius: BorderRadius.circular(tokens.radiusSm),
-            boxShadow: [
-              BoxShadow(
-                color: scheme.shadow.withValues(alpha: 0.4),
-                blurRadius: tokens.spaceXl,
-                offset: Offset(0, tokens.spaceSm),
-              ),
-            ],
+            // No `borderRadius`. See the note on the class: the page is a
+            // sheet of paper, and the arc was cutting the corners off the
+            // document it exists to show.
+            //
+            // A mat, not a shadow, and it is what carries the separation now
+            // that the corners are square — the radius never did. On the light
+            // palette the page needed a lift to read as a sheet at all; on a
+            // dark one it is the brightest object on the screen and needs no
+            // help separating — a shadow under it would do nothing. What it
+            // needs is the opposite: an edge, so 19.4:1 of white does not cut
+            // straight into a near-black base. The mid-tone ring is that step
+            // down — 3.40:1 from the paper it contains and 5.68:1 from the
+            // surface behind it, so it reads from both sides — and it is the
+            // same ring the gallery frames its thumbnails with, so a document
+            // is matted the same way everywhere in the app.
+            border: Border.all(color: theme.colorScheme.outline),
           ),
-          clipBehavior: Clip.antiAlias,
+          // Rectangular now, so there is no curve to antialias — but still a
+          // clip. It is the guarantee that app chrome cannot paint off the
+          // paper and onto the matte base: at large text scales the stale
+          // banner grows upward from the bottom edge, and a warning strip
+          // hanging off the sheet reads as a broken layout.
+          clipBehavior: Clip.hardEdge,
           child: LayoutBuilder(
             builder: (context, page) {
               // In landscape the whole A4 page is only ~160dp wide. Full-text
@@ -103,11 +140,24 @@ class ResumePreview extends StatelessWidget {
                       text: 'Preview failed to render',
                       onRetry: onRetry,
                     ),
+                  // Both overlays sit `spaceMd` in from the paper's edge.
+                  //
+                  // That number used to be doing two jobs. It was picked to
+                  // clear the page's 12dp corner arc — at `spaceSm` the pill's
+                  // outer corner fell inside the curve and `Clip.antiAlias`
+                  // shaved it flat, a rounded pill with one square corner
+                  // (UI-033) — and `spaceMd` only happened to equal
+                  // `radiusSm`. With the corners square there is no arc to
+                  // clear and nothing couples the two, so this is now what it
+                  // looks like: a margin, off the standard spacing scale,
+                  // chosen so chrome floating on a document does not crowd the
+                  // mat ring. It is free to move without anything being
+                  // clipped.
                   if (isRendering)
                     Positioned(
-                      top: tokens.spaceSm,
-                      left: tokens.spaceSm,
-                      right: tokens.spaceSm,
+                      top: tokens.spaceMd,
+                      left: tokens.spaceMd,
+                      right: tokens.spaceMd,
                       child: Align(
                         alignment: Alignment.topRight,
                         child: _BusyPill(compact: compact),
@@ -115,9 +165,9 @@ class ResumePreview extends StatelessWidget {
                     ),
                   if (error != null && hasFrame)
                     Positioned(
-                      left: tokens.spaceSm,
-                      right: tokens.spaceSm,
-                      bottom: tokens.spaceSm,
+                      left: tokens.spaceMd,
+                      right: tokens.spaceMd,
+                      bottom: tokens.spaceMd,
                       child: Align(
                         alignment: Alignment.bottomLeft,
                         child: _StaleBanner(onRetry: onRetry, compact: compact),
@@ -135,9 +185,9 @@ class ResumePreview extends StatelessWidget {
 
 /// A themed card floated on the white page.
 ///
-/// Everything here is app chrome sitting on a document, so it uses the app's
-/// dark surfaces: ink-on-paper greys would either fail contrast or force a
-/// second, light palette into a dark design system.
+/// Everything here is app chrome sitting on a document. The card takes the
+/// theme's deepest surface rather than a panel tint, so at 19:1 against the
+/// paper it cannot be mistaken for something the resume itself prints.
 class _PageOverlay extends StatelessWidget {
   const _PageOverlay({
     required this.text,
@@ -163,6 +213,7 @@ class _PageOverlay extends StatelessWidget {
         padding: EdgeInsets.all(tokens.spaceMd),
         child: Center(
           child: Card(
+            color: theme.colorScheme.surfaceContainerLowest,
             child: Padding(
               padding: EdgeInsets.symmetric(
                 horizontal: tokens.spaceLg,
@@ -205,8 +256,13 @@ class _PageOverlay extends StatelessWidget {
 
 /// Small, non-blocking activity marker. Deliberately not a full-page overlay.
 ///
-/// It has to sit on white paper, so it carries its own dark surface — a
-/// white-on-white chip was invisible in practice.
+/// It has to be *noticed* on white paper at pill size, which a pale tint at
+/// this scale is not, so it takes the theme's deepest surface: 19:1 against the
+/// page. It used to take `inverseSurface` and cannot any more — inverted
+/// semantics flip with the palette, and on a dark scheme that slot is the light
+/// snackbar surface, which on white paper would be nearly invisible. The pill
+/// is not "inverted chrome", it is "chrome on a document", and those were only
+/// ever the same colour by coincidence.
 class _BusyPill extends StatelessWidget {
   const _BusyPill({required this.compact});
 
@@ -224,7 +280,7 @@ class _BusyPill extends StatelessWidget {
       child: Tooltip(
         message: 'Updating preview',
         child: Material(
-          color: theme.colorScheme.surfaceContainerHigh,
+          color: theme.colorScheme.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(tokens.radiusPill),
           child: Padding(
             padding: EdgeInsets.symmetric(
@@ -250,7 +306,7 @@ class _BusyPill extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                        color: theme.colorScheme.onSurface,
                       ),
                     ),
                   ),

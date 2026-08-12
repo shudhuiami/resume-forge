@@ -1,21 +1,29 @@
 import 'dart:math';
-import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:resume_forge/data/photo_service.dart';
 
-/// Stands in for the platform picker. Only [pickImage] is used; everything else
-/// on the interface is forwarded to [noSuchMethod] and never called.
+/// Stands in for the platform picker. Only [pickImage] and
+/// [supportsImageSource] are used; everything else on the interface is
+/// forwarded to [noSuchMethod] and never called.
 class _FakePicker implements ImagePicker {
-  _FakePicker({this.result, this.error});
+  _FakePicker({this.result, this.error, this.cameraSupported = true});
 
   /// Bytes the picker "returns", or null to simulate the user cancelling.
   final Uint8List? result;
 
   /// Thrown instead of returning, to simulate a platform failure.
   final Object? error;
+
+  /// What the platform claims about camera support.
+  final bool cameraSupported;
+
+  /// The source the service actually asked the platform for. Recorded so the
+  /// camera path can be shown to reach the boundary rather than merely compile.
+  ImageSource? requestedSource;
 
   @override
   Future<XFile?> pickImage({
@@ -26,10 +34,15 @@ class _FakePicker implements ImagePicker {
     CameraDevice preferredCameraDevice = CameraDevice.rear,
     bool requestFullMetadata = true,
   }) async {
+    requestedSource = source;
     if (error != null) throw error!;
     if (result == null) return null;
     return XFile.fromData(result!, name: 'portrait.png');
   }
+
+  @override
+  bool supportsImageSource(ImageSource source) =>
+      source == ImageSource.camera ? cameraSupported : true;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -289,6 +302,210 @@ void main() {
         reason:
             'an unreadable image is a different problem from an '
             'inaccessible photo library, and the message should say which',
+      );
+    });
+  });
+
+  group('PhotoService camera source', () {
+    // The camera is a second entry point into the same pipeline, and every one
+    // of its failure modes is something an ordinary user hits: a tablet with no
+    // camera, a refused permission, an impatient double tap. None of them may
+    // escape as an exception, and each has to say something different — the
+    // whole point of routing them is that "try again" is wrong advice for a
+    // device that will never have a camera.
+
+    test('asks the platform for the camera, not the gallery', () async {
+      final raw = solidPng(300, 300, [90, 90, 90]);
+      final picker = _FakePicker(result: raw);
+
+      final result = await PhotoService(picker: picker).pickFromCamera();
+
+      expect(picker.requestedSource, ImageSource.camera);
+      expect(result.status, PhotoPickStatus.picked);
+      expect(result.bytes, isNotNull);
+    });
+
+    test('pickFromGallery still asks for the gallery', () async {
+      final picker = _FakePicker(result: solidPng(80, 80, [1, 2, 3]));
+
+      await PhotoService(picker: picker).pickFromGallery();
+
+      expect(picker.requestedSource, ImageSource.gallery);
+    });
+
+    test('backing out of the camera is a cancellation, not an error', () async {
+      final picker = _FakePicker();
+
+      final result = await PhotoService(picker: picker).pickFromCamera();
+
+      expect(result.status, PhotoPickStatus.cancelled);
+      expect(result.message, isNull);
+    });
+
+    test(
+      'a device with no camera fails cleanly and offers the gallery',
+      () async {
+        // image_picker_android raises this when ACTION_IMAGE_CAPTURE resolves to
+        // nothing — an emulator with the camera disabled, or a device with no
+        // camera app at all.
+        final service = PhotoService(
+          picker: _FakePicker(
+            error: PlatformException(
+              code: 'no_available_camera',
+              message: 'No cameras available for taking pictures.',
+            ),
+          ),
+        );
+
+        final result = await service.pickFromCamera();
+
+        expect(result.status, PhotoPickStatus.failed);
+        expect(result.message, contains('No camera'));
+        expect(
+          result.message,
+          isNot(contains('Settings')),
+          reason:
+              'missing hardware is not a permission the user can go and grant; '
+              'sending them to Settings is a dead end',
+        );
+        expect(
+          result.message,
+          contains('existing photo'),
+          reason: 'the only way forward is the other source, so name it',
+        );
+      },
+    );
+
+    test(
+      'a platform with no camera implementation fails the same way',
+      () async {
+        // What image_picker's desktop implementations throw when no camera
+        // delegate is registered. Different platform, same dead end.
+        final service = PhotoService(
+          picker: _FakePicker(
+            error: StateError(
+              'This implementation of ImagePickerPlatform requires a '
+              '"cameraDelegate" in order to use ImageSource.camera',
+            ),
+          ),
+        );
+
+        final result = await service.pickFromCamera();
+
+        expect(result.status, PhotoPickStatus.failed);
+        expect(result.message, contains('No camera'));
+      },
+    );
+
+    test('a refused camera permission names the camera, not photos', () async {
+      final service = PhotoService(
+        picker: _FakePicker(
+          error: PlatformException(
+            code: 'camera_access_denied',
+            message: 'The user did not allow camera access.',
+          ),
+        ),
+      );
+
+      final result = await service.pickFromCamera();
+
+      expect(result.status, PhotoPickStatus.denied);
+      expect(result.message, contains('Camera access'));
+      expect(result.message, contains('Settings'));
+      expect(
+        result.message,
+        isNot(contains('Photo access')),
+        reason:
+            'the user refused the camera; pointing them at the photo-library '
+            'switch sends them to a setting that changes nothing',
+      );
+    });
+
+    test('a camera blocked by parental controls is also denied', () async {
+      final service = PhotoService(
+        picker: _FakePicker(
+          error: PlatformException(
+            code: 'camera_access_restricted',
+            message: 'The user is not allowed to use the camera.',
+          ),
+        ),
+      );
+
+      final result = await service.pickFromCamera();
+
+      expect(result.status, PhotoPickStatus.denied);
+      expect(result.message, contains('Settings'));
+    });
+
+    test('a refused photo permission still names photos', () async {
+      final service = PhotoService(
+        picker: _FakePicker(
+          error: PlatformException(
+            code: 'photo_access_denied',
+            message: 'The user did not allow photo access.',
+          ),
+        ),
+      );
+
+      final result = await service.pickFromGallery();
+
+      expect(result.status, PhotoPickStatus.denied);
+      expect(result.message, contains('Photo access'));
+    });
+
+    test('a second request while one is open says so', () async {
+      final service = PhotoService(
+        picker: _FakePicker(
+          error: PlatformException(
+            code: 'already_active',
+            message: 'Image picker is already active',
+          ),
+        ),
+      );
+
+      final result = await service.pickFromCamera();
+
+      expect(result.status, PhotoPickStatus.failed);
+      expect(result.message, contains('already open'));
+    });
+
+    test('an unrecognised camera error blames the camera', () async {
+      final service = PhotoService(
+        picker: _FakePicker(error: StateError('something else entirely')),
+      );
+
+      final result = await service.pickFromCamera();
+
+      expect(result.status, PhotoPickStatus.failed);
+      expect(
+        result.message,
+        contains('camera'),
+        reason: 'a camera failure reported as a photo-library failure misleads',
+      );
+    });
+
+    test('a captured photo goes through the same downscale', () async {
+      final raw = pngOf(1000, 1000, (x, y) => [x % 256, y % 256, 0]);
+
+      final result = await PhotoService(
+        picker: _FakePicker(result: raw),
+      ).pickFromCamera();
+
+      final image = decode(result.bytes);
+      expect(image.width, PhotoService.maxEdge);
+      expect(image.height, PhotoService.maxEdge);
+    });
+
+    test('supportsCamera reports what the platform claims', () {
+      expect(
+        PhotoService(picker: _FakePicker(cameraSupported: true)).supportsCamera,
+        isTrue,
+      );
+      expect(
+        PhotoService(
+          picker: _FakePicker(cameraSupported: false),
+        ).supportsCamera,
+        isFalse,
       );
     });
   });

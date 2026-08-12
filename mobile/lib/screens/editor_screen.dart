@@ -1,9 +1,11 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/photo_service.dart';
+import '../data/sample_resume.dart';
 import '../models/resume.dart';
 import '../render/pdf_export.dart';
 import '../render/truncation_check.dart';
@@ -11,6 +13,7 @@ import '../state/app_providers.dart';
 import '../state/editor_controller.dart';
 import '../templates/registry.dart';
 import '../theme/tokens.dart';
+import '../widgets/confirm_dialog.dart';
 import '../widgets/form_fields.dart';
 import '../widgets/pdf_page_view.dart';
 import 'gallery_screen.dart';
@@ -27,9 +30,19 @@ const _maxFormWidth = 640.0;
 /// too small to touch — so editing happens in the form and the page is
 /// something you check, not something you type into.
 class EditorScreen extends ConsumerStatefulWidget {
-  const EditorScreen({super.key, required this.document});
+  const EditorScreen({super.key, required this.document, this.fileSaver});
 
   final ResumeDocument document;
+
+  /// Seam for the platform save dialog.
+  ///
+  /// Null in the app, which is what makes [PdfExport.save] use the real
+  /// Storage Access Framework picker. A widget test passes a stub so the
+  /// saved / dismissed / failed outcomes can each be driven through the UI —
+  /// none of them is reachable otherwise, because the picker is an activity no
+  /// test can answer.
+  @visibleForTesting
+  final PdfFileSaver? fileSaver;
 
   @override
   ConsumerState<EditorScreen> createState() => _EditorScreenState();
@@ -65,17 +78,63 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _controller.saveNow();
+    // The undo offer cannot outlive the editor it undoes into.
+    _undoBar?.close();
     _tabs.dispose();
     _controller.dispose();
     super.dispose();
   }
 
-  /// True from the tap until the share sheet has been offered. Keeps the
+  /// True from the tap until the platform has been handed the PDF. Keeps the
   /// action from being fired twice, which would build the document twice and
   /// stack two share sheets.
   bool _exporting = false;
 
+  /// Asks where the PDF should go, then sends it there.
+  ///
+  /// The question comes *before* the build rather than after it. It costs
+  /// nothing while nothing is happening, it keeps the number of things
+  /// stacked on top of the progress snackbar down to the truncation warning
+  /// alone, and a user who backs out never pays for a render they did not
+  /// want.
   Future<void> _export() async {
+    if (_exporting) return;
+
+    // One option is not a choice. Where the platform has no save picker —
+    // web and desktop, per `canSaveToDisk` — the tap goes straight to the
+    // share sheet, exactly as it did before this chooser existed, rather than
+    // opening a sheet with a single row or a row that is only there to be
+    // disabled.
+    final destination = PdfExport.canSaveToDisk
+        ? await _chooseExportDestination()
+        : _ExportDestination.share;
+    if (destination == null || !mounted) return;
+
+    await _runExport(destination);
+  }
+
+  Future<_ExportDestination?> _chooseExportDestination() =>
+      _showChooser<_ExportDestination>(
+        context,
+        title: 'Export PDF',
+        options: const [
+          _ChooserOption(
+            value: _ExportDestination.share,
+            // The same glyph as the app bar action that opened this sheet.
+            icon: Icons.ios_share,
+            label: 'Share',
+            description: 'Send the PDF through another app.',
+          ),
+          _ChooserOption(
+            value: _ExportDestination.save,
+            icon: Icons.save_alt,
+            label: 'Save to device',
+            description: 'Choose where to keep the file.',
+          ),
+        ],
+      );
+
+  Future<void> _runExport(_ExportDestination destination) async {
     if (_exporting) return;
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _exporting = true);
@@ -88,10 +147,16 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
       SnackBar(
         content: Row(
           children: [
-            const SizedBox(
+            SizedBox(
               width: 16,
               height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                // A snackbar is the app's one inverted surface — light, on a
+                // dark app — so the spinner takes the inverted accent. The
+                // standard light violet primary all but disappears on it.
+                color: Theme.of(context).colorScheme.inversePrimary,
+              ),
             ),
             SizedBox(width: context.tokens.spaceMd),
             const Expanded(child: Text('Preparing PDF…')),
@@ -128,20 +193,46 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
       }
       if (!mounted) return;
 
-      final outcome = await PdfExport.share(
-        pdfBytes: bytes,
-        info: _controller.state.data.personalInfo,
-      );
+      final info = _controller.state.data.personalInfo;
+      final outcome = switch (destination) {
+        _ExportDestination.share => await PdfExport.share(
+          pdfBytes: bytes,
+          info: info,
+        ),
+        _ExportDestination.save => await PdfExport.save(
+          pdfBytes: bytes,
+          info: info,
+          saver: widget.fileSaver,
+        ),
+      };
       if (!mounted) return;
-      // A dismissed share sheet is the user changing their mind, not a
-      // failure, and says nothing.
-      if (outcome.isFailure) {
-        _showExportFailure(messenger, outcome.message);
+
+      switch (outcome.status) {
+        // The platform share sheet is its own confirmation, and a sheet or
+        // picker the user backed out of is them changing their mind. Neither
+        // is worth a message.
+        case ExportStatus.shared:
+        case ExportStatus.dismissed:
+          break;
+        // A save picker closes leaving no trace of what happened, so this is
+        // the one outcome that has to say so itself. It says the *name*: the
+        // location the platform hands back is a `content://` URI, which is
+        // documented as unfit to show a user.
+        case ExportStatus.saved:
+          messenger.showSnackBar(
+            SnackBar(content: Text('Saved as ${PdfExport.fileNameFor(info)}')),
+          );
+        case ExportStatus.failed:
+          _showExportFailure(messenger, outcome.message, destination);
       }
     } catch (_) {
       progress.close();
       if (!mounted) return;
-      _showExportFailure(messenger, 'Could not prepare the PDF for export.');
+      _showExportFailure(
+        messenger,
+        'Could not prepare the PDF for export.',
+        destination,
+      );
     } finally {
       if (mounted) setState(() => _exporting = false);
     }
@@ -176,13 +267,23 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     return confirmed ?? false;
   }
 
-  void _showExportFailure(ScaffoldMessengerState messenger, String? message) {
+  void _showExportFailure(
+    ScaffoldMessengerState messenger,
+    String? message,
+    _ExportDestination destination,
+  ) {
     messenger.showSnackBar(
       SnackBar(
         content: Text(message ?? 'Could not export the PDF.'),
         // Long enough to read a two-line explanation and reach the action.
         duration: const Duration(seconds: 8),
-        action: SnackBarAction(label: 'Try again', onPressed: _export),
+        action: SnackBarAction(
+          label: 'Try again',
+          // Retries the destination the user already picked rather than
+          // reopening the chooser: they answered that question once, and a
+          // failed save is not a reason to ask it again.
+          onPressed: () => _runExport(destination),
+        ),
       ),
     );
   }
@@ -205,26 +306,199 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     _tabs.animateTo(1);
   }
 
-  Future<void> _pickPhoto() async {
-    final messenger = ScaffoldMessenger.of(context);
-    final result = await ref.read(photoServiceProvider).pick();
-    if (!mounted) return;
+  /// True while a photo request is in flight.
+  ///
+  /// The platform picker is single-flight — a second request comes back as
+  /// `already_active` — so a double tap is dropped here rather than turned
+  /// into an error the user has to read and dismiss.
+  bool _pickingPhoto = false;
 
-    switch (result.status) {
-      case PhotoPickStatus.picked:
-        _controller.updateData(
-          (d) => d.copyWith(
-            personalInfo: d.personalInfo.copyWith(photo: result.bytes),
-          ),
-        );
-      case PhotoPickStatus.cancelled:
-        break;
-      case PhotoPickStatus.denied:
-      case PhotoPickStatus.failed:
-        messenger.showSnackBar(
-          SnackBar(content: Text(result.message ?? 'Could not add the photo.')),
-        );
+  /// Asks where the photo should come from, then goes and gets it.
+  Future<void> _pickPhoto() async {
+    if (_pickingPhoto) return;
+
+    // One option is not a choice. A device that reports no camera is offered
+    // the library directly — which is what this button did before the chooser
+    // existed — rather than a sheet with one row, or a camera row sitting
+    // there greyed out with nothing to say for itself.
+    final source = ref.read(photoServiceProvider).supportsCamera
+        ? await _choosePhotoSource()
+        : _PhotoSource.gallery;
+    if (source == null || !mounted) return;
+
+    await _pickPhotoFrom(source);
+  }
+
+  Future<_PhotoSource?> _choosePhotoSource() {
+    final hasPhoto = _controller.state.data.personalInfo.photo != null;
+    return _showChooser<_PhotoSource>(
+      context,
+      // Says which of the two things the tap is about to do, since the same
+      // sheet serves the empty tile and the replace action.
+      title: hasPhoto ? 'Replace photo' : 'Add photo',
+      options: const [
+        _ChooserOption(
+          value: _PhotoSource.camera,
+          icon: Icons.photo_camera_outlined,
+          label: 'Take a photo',
+          description: 'Open the camera and capture one now.',
+        ),
+        _ChooserOption(
+          value: _PhotoSource.gallery,
+          // Worded to match the service's own advice when the camera is
+          // unavailable — "Choose an existing photo instead" then names a row
+          // that is really on the sheet.
+          icon: Icons.photo_library_outlined,
+          label: 'Choose an existing photo',
+          description: 'Pick one from your photo library.',
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickPhotoFrom(_PhotoSource source) async {
+    if (_pickingPhoto) return;
+    _pickingPhoto = true;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final service = ref.read(photoServiceProvider);
+    try {
+      final result = switch (source) {
+        _PhotoSource.camera => await service.pickFromCamera(),
+        _PhotoSource.gallery => await service.pickFromGallery(),
+      };
+      if (!mounted) return;
+
+      switch (result.status) {
+        case PhotoPickStatus.picked:
+          _controller.updateData(
+            (d) => d.copyWith(
+              personalInfo: d.personalInfo.copyWith(photo: result.bytes),
+            ),
+          );
+        // Backing out of the camera or the library is not a failure and says
+        // nothing, exactly as a dismissed chooser says nothing.
+        case PhotoPickStatus.cancelled:
+          break;
+        case PhotoPickStatus.denied:
+        case PhotoPickStatus.failed:
+          _showPhotoProblem(messenger, result.message, source);
+      }
+    } finally {
+      _pickingPhoto = false;
     }
+  }
+
+  /// Surfaces the service's own explanation of a failed pick.
+  ///
+  /// The sentence is the service's, never this screen's: it is what tells a
+  /// device with no camera (nothing to fix, use the library) apart from a
+  /// refused permission (fixable in Settings), and replacing it with one
+  /// generic line here would throw that distinction away.
+  void _showPhotoProblem(
+    ScaffoldMessengerState messenger,
+    String? message,
+    _PhotoSource source,
+  ) {
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message ?? 'Could not add the photo.'),
+        // Long enough to read a two-line explanation and reach the action.
+        duration: const Duration(seconds: 8),
+        // Every way the camera can fail — no hardware, a refused permission,
+        // no camera app — leaves exactly one way forward, and the message
+        // already names it. This is that sentence made tappable, so the user
+        // is not sent back to hunt for the button they just used. A library
+        // failure has no such second route, so it gets no action.
+        action: source == _PhotoSource.camera
+            ? SnackBarAction(
+                label: 'Choose photo',
+                onPressed: () => _pickPhotoFrom(_PhotoSource.gallery),
+              )
+            : null,
+      ),
+    );
+  }
+
+  /// The live undo offer, if one is showing. Held so it can be closed when the
+  /// editor goes away — a snackbar outlives its route, and an Undo that no
+  /// longer has an editor to act on is a dead button.
+  ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _undoBar;
+
+  /// True when there is anything at all in this resume worth losing.
+  ///
+  /// Stricter than [ResumeData.isEmpty], which ignores a photo and a
+  /// half-filled entry — both of which a destructive action would still throw
+  /// away.
+  bool get _hasContent => _controller.state.data != const ResumeData();
+
+  /// Replaces the entire document in one step, through the same path as a
+  /// normal edit so autosave, the preview, and the truncation check all run.
+  ///
+  /// Nothing extra is needed to make the change visible: the fields are
+  /// controller-backed and follow the model wherever the change came from.
+  /// This used to bump a revision counter that the form was keyed on, which
+  /// rebuilt every field from scratch to work around uncontrolled fields that
+  /// only ever read their value once.
+  void _replaceData(ResumeData next, {required String message}) {
+    final previous = _controller.state.data;
+    _controller.updateData((_) => next);
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    final bar = messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        // Long enough to notice that everything changed and to act on it.
+        duration: const Duration(seconds: 8),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            if (!mounted) return;
+            _controller.updateData((_) => previous);
+          },
+        ),
+      ),
+    );
+    _undoBar = bar;
+    // Dropped as soon as it goes away on its own: closing a snackbar that has
+    // already left the queue throws.
+    bar.closed.whenComplete(() {
+      if (identical(_undoBar, bar)) _undoBar = null;
+    });
+  }
+
+  /// Fills the resume with the example document.
+  ///
+  /// Reuses the same fixture the gallery renders its thumbnails from, so what
+  /// the user picked a design by is what they get when they ask to see it
+  /// filled in.
+  Future<void> _loadSample() async {
+    if (_hasContent) {
+      final replace = await confirmDestructive(
+        context,
+        title: 'Replace what you have written?',
+        message:
+            'Everything in this resume is swapped for an example one. '
+            'Your design stays as it is.',
+        confirmLabel: 'Replace',
+      );
+      if (!replace || !mounted) return;
+    }
+    _replaceData(sampleResume, message: 'Sample resume loaded.');
+  }
+
+  Future<void> _clearAll() async {
+    final clear = await confirmDestructive(
+      context,
+      title: 'Clear this resume?',
+      message:
+          'Every field is emptied, including your photo. '
+          'Your design stays as it is.',
+      confirmLabel: 'Clear',
+    );
+    if (!clear || !mounted) return;
+    _replaceData(const ResumeData(), message: 'Resume cleared.');
   }
 
   @override
@@ -264,6 +538,15 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                     : const Icon(Icons.ios_share),
                 tooltip: 'Export PDF',
               ),
+              // Whole-document actions live here rather than in a button row
+              // above the fields: both are used at most once per resume, and a
+              // permanent row would push the first thing the user came to type
+              // further down every phone screen.
+              _DocumentMenu(
+                canClear: _hasContent,
+                onLoadSample: _loadSample,
+                onClear: _clearAll,
+              ),
             ],
           ),
           body: Column(
@@ -271,8 +554,25 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
               // Above the tabs so it is visible whether the user is typing or
               // looking at the page. Content that never reaches the PDF is not
               // something to discover at the export dialog.
-              if (state.truncation.hasLoss)
-                _TruncationBanner(report: state.truncation),
+              //
+              // **Always in this list**, drawing nothing when there is no loss
+              // to report, so the column's child count and types never change
+              // while the user is typing. Everything they have written lives
+              // under the `Expanded` below — every field's State, its
+              // controller and its FocusNode — and a child list that changes
+              // shape is how that subtree gets remounted and the keyboard
+              // dropped mid-sentence.
+              //
+              // Flutter's own reconciliation already survives an insert at the
+              // front here, because it matches the trailing children from the
+              // bottom of the list and this `Expanded` is last; that is
+              // asserted directly in `editor_keyboard_test.dart` rather than
+              // assumed. Keeping the count constant makes it structural
+              // instead of a property of where the conditional child happens
+              // to sit — the alternative, keying the children, states the same
+              // thing but only holds while every future edit remembers to
+              // carry the keys.
+              _TruncationBanner(report: state.truncation),
               Expanded(child: _tabViews(state)),
             ],
           ),
@@ -294,6 +594,87 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
             buildError: state.renderError,
             onRetry: _controller.retryPreview,
           ),
+        ),
+      ],
+    );
+  }
+}
+
+enum _DocumentAction { loadSample, clear }
+
+/// Overflow menu for actions that act on the resume as a whole.
+class _DocumentMenu extends StatelessWidget {
+  const _DocumentMenu({
+    required this.canClear,
+    required this.onLoadSample,
+    required this.onClear,
+  });
+
+  /// False when the resume is already blank — clearing nothing would be a
+  /// control that looks live and does nothing.
+  final bool canClear;
+  final VoidCallback onLoadSample;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return PopupMenuButton<_DocumentAction>(
+      icon: const Icon(Icons.more_vert),
+      tooltip: 'More actions',
+      onSelected: (action) {
+        switch (action) {
+          case _DocumentAction.loadSample:
+            onLoadSample();
+          case _DocumentAction.clear:
+            onClear();
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: _DocumentAction.loadSample,
+          child: _MenuRow(
+            icon: Icons.auto_awesome_outlined,
+            label: 'Load sample data',
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        PopupMenuItem(
+          value: _DocumentAction.clear,
+          enabled: canClear,
+          child: _MenuRow(
+            icon: Icons.backspace_outlined,
+            label: 'Clear all fields',
+            // Marked as destructive before the tap, not only in the dialog
+            // after it. Dropped when disabled so the item still reads as
+            // unavailable rather than as a live red action.
+            color: canClear ? theme.colorScheme.error : null,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MenuRow extends StatelessWidget {
+  const _MenuRow({required this.icon, required this.label, this.color});
+
+  final IconData icon;
+  final String label;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 20, color: color),
+        SizedBox(width: context.tokens.spaceMd),
+        // A menu is as wide as its widest item, so long labels get a line
+        // break rather than a clipped word.
+        Flexible(
+          child: Text(label, style: TextStyle(color: color)),
         ),
       ],
     );
@@ -344,418 +725,478 @@ class _EditorForm extends StatelessWidget {
         MediaQuery.viewInsetsOf(context).bottom + tokens.spaceXxl * 2,
       ),
       children: [
-        const SectionHeader(title: 'About you'),
-        _PhotoRow(
-          photo: info.photo,
-          onPick: onPickPhoto,
-          onRemove: () {
-            _edit(
-              (d) => d.copyWith(
-                personalInfo: d.personalInfo.copyWith(photo: null),
-              ),
-            );
-          },
-        ),
-        ResumeTextField(
-          label: 'Full name',
-          value: info.fullName,
-          autofillHints: const [AutofillHints.name],
-          textCapitalization: TextCapitalization.words,
-          onChanged: (v) => _edit(
-            (d) =>
-                d.copyWith(personalInfo: d.personalInfo.copyWith(fullName: v)),
-          ),
-        ),
-        ResumeTextField(
-          label: 'Job title',
-          value: info.title,
-          hint: 'Senior Product Designer',
-          onChanged: (v) => _edit(
-            (d) => d.copyWith(personalInfo: d.personalInfo.copyWith(title: v)),
-          ),
-        ),
-        ResumeTextField(
-          label: 'Email',
-          value: info.email,
-          keyboardType: TextInputType.emailAddress,
-          textCapitalization: TextCapitalization.none,
-          autofillHints: const [AutofillHints.email],
-          onChanged: (v) => _edit(
-            (d) => d.copyWith(personalInfo: d.personalInfo.copyWith(email: v)),
-          ),
-        ),
-        ResumeTextField(
-          label: 'Phone',
-          value: info.phone,
-          keyboardType: TextInputType.phone,
-          autofillHints: const [AutofillHints.telephoneNumber],
-          onChanged: (v) => _edit(
-            (d) => d.copyWith(personalInfo: d.personalInfo.copyWith(phone: v)),
-          ),
-        ),
-        ResumeTextField(
-          label: 'Location',
-          value: info.location,
-          onChanged: (v) => _edit(
-            (d) =>
-                d.copyWith(personalInfo: d.personalInfo.copyWith(location: v)),
-          ),
-        ),
-        ResumeTextField(
-          label: 'LinkedIn',
-          value: info.linkedin,
-          textCapitalization: TextCapitalization.none,
-          keyboardType: TextInputType.url,
-          onChanged: (v) => _edit(
-            (d) =>
-                d.copyWith(personalInfo: d.personalInfo.copyWith(linkedin: v)),
-          ),
-        ),
-        ResumeTextField(
-          label: 'Website',
-          value: info.website,
-          textCapitalization: TextCapitalization.none,
-          keyboardType: TextInputType.url,
-          onChanged: (v) => _edit(
-            (d) =>
-                d.copyWith(personalInfo: d.personalInfo.copyWith(website: v)),
-          ),
-        ),
-        ResumeTextField(
-          label: 'Summary',
-          value: info.summary,
-          maxLines: 5,
-          helper:
-              'Two or three sentences on what you do and what you are known for.',
-          onChanged: (v) => _edit(
-            (d) =>
-                d.copyWith(personalInfo: d.personalInfo.copyWith(summary: v)),
-          ),
-        ),
-
-        SectionHeader(
-          title: 'Experience',
-          subtitle: data.experiences.isEmpty ? 'No roles added yet' : null,
-        ),
-        for (final (i, e) in data.experiences.indexed)
-          EntryCard(
-            key: ValueKey(e.id),
-            title: 'ROLE ${i + 1}',
-            removeTooltip: 'Remove this role',
-            onRemove: () => _edit(
-              (d) => d.copyWith(
-                experiences: [...d.experiences]
-                  ..removeWhere((x) => x.id == e.id),
-              ),
+        FormSectionCard(
+          icon: Icons.badge_outlined,
+          tone: SectionTone.about,
+          title: 'About you',
+          subtitle: 'The header of every design is built from this.',
+          children: [
+            _PhotoTile(
+              photo: info.photo,
+              onPick: onPickPhoto,
+              onRemove: () {
+                _edit(
+                  (d) => d.copyWith(
+                    personalInfo: d.personalInfo.copyWith(photo: null),
+                  ),
+                );
+              },
             ),
-            children: [
-              ResumeTextField(
-                label: 'Position',
-                value: e.position,
-                onChanged: (v) =>
-                    _editExperience(e.id, (x) => x.copyWith(position: v)),
-              ),
-              ResumeTextField(
-                label: 'Company',
-                value: e.company,
-                onChanged: (v) =>
-                    _editExperience(e.id, (x) => x.copyWith(company: v)),
-              ),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: MonthYearField(
-                      label: 'Start',
-                      value: e.startDate,
-                      onChanged: (v) => _editExperience(
-                        e.id,
-                        (x) => x.copyWith(startDate: v),
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: context.tokens.spaceMd),
-                  Expanded(
-                    child: MonthYearField(
-                      label: 'End',
-                      value: e.endDate,
-                      enabled: !e.current,
-                      onChanged: (v) =>
-                          _editExperience(e.id, (x) => x.copyWith(endDate: v)),
-                    ),
-                  ),
-                ],
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                value: e.current,
-                title: const Text('I currently work here'),
-                onChanged: (v) => _editExperience(
-                  e.id,
-                  // Clearing the end date matters: a stale value would keep
-                  // rendering behind the "Present" label in the PDF.
-                  (x) => x.copyWith(current: v, endDate: v ? '' : x.endDate),
+            SizedBox(height: tokens.spaceLg),
+            ResumeTextField(
+              label: 'Full name',
+              value: info.fullName,
+              autofillHints: const [AutofillHints.name],
+              textCapitalization: TextCapitalization.words,
+              onChanged: (v) => _edit(
+                (d) => d.copyWith(
+                  personalInfo: d.personalInfo.copyWith(fullName: v),
                 ),
               ),
-              ResumeTextField(
-                label: 'What you did',
-                value: e.description,
-                maxLines: 4,
-                onChanged: (v) =>
-                    _editExperience(e.id, (x) => x.copyWith(description: v)),
-              ),
-            ],
-          ),
-        AddEntryButton(
-          label: 'Add role',
-          onPressed: () => _edit(
-            (d) => d.copyWith(
-              experiences: [
-                ...d.experiences,
-                Experience(id: _newId('exp')),
-              ],
             ),
-          ),
+            ResumeTextField(
+              label: 'Job title',
+              value: info.title,
+              hint: 'Senior Product Designer',
+              onChanged: (v) => _edit(
+                (d) =>
+                    d.copyWith(personalInfo: d.personalInfo.copyWith(title: v)),
+              ),
+            ),
+            ResumeTextField(
+              label: 'Email',
+              value: info.email,
+              keyboardType: TextInputType.emailAddress,
+              textCapitalization: TextCapitalization.none,
+              autofillHints: const [AutofillHints.email],
+              onChanged: (v) => _edit(
+                (d) =>
+                    d.copyWith(personalInfo: d.personalInfo.copyWith(email: v)),
+              ),
+            ),
+            ResumeTextField(
+              label: 'Phone',
+              value: info.phone,
+              keyboardType: TextInputType.phone,
+              autofillHints: const [AutofillHints.telephoneNumber],
+              onChanged: (v) => _edit(
+                (d) =>
+                    d.copyWith(personalInfo: d.personalInfo.copyWith(phone: v)),
+              ),
+            ),
+            ResumeTextField(
+              label: 'Location',
+              value: info.location,
+              onChanged: (v) => _edit(
+                (d) => d.copyWith(
+                  personalInfo: d.personalInfo.copyWith(location: v),
+                ),
+              ),
+            ),
+            ResumeTextField(
+              label: 'LinkedIn',
+              value: info.linkedin,
+              textCapitalization: TextCapitalization.none,
+              keyboardType: TextInputType.url,
+              onChanged: (v) => _edit(
+                (d) => d.copyWith(
+                  personalInfo: d.personalInfo.copyWith(linkedin: v),
+                ),
+              ),
+            ),
+            ResumeTextField(
+              label: 'Website',
+              value: info.website,
+              textCapitalization: TextCapitalization.none,
+              keyboardType: TextInputType.url,
+              onChanged: (v) => _edit(
+                (d) => d.copyWith(
+                  personalInfo: d.personalInfo.copyWith(website: v),
+                ),
+              ),
+            ),
+            ResumeTextField(
+              label: 'Summary',
+              value: info.summary,
+              maxLines: 5,
+              helper:
+                  'Two or three sentences on what you do and what you are known for.',
+              onChanged: (v) => _edit(
+                (d) => d.copyWith(
+                  personalInfo: d.personalInfo.copyWith(summary: v),
+                ),
+              ),
+            ),
+          ],
         ),
 
-        SectionHeader(
-          title: 'Education',
-          subtitle: data.education.isEmpty ? 'No education added yet' : null,
-        ),
-        for (final (i, e) in data.education.indexed)
-          EntryCard(
-            key: ValueKey(e.id),
-            title: 'EDUCATION ${i + 1}',
-            removeTooltip: 'Remove this entry',
-            onRemove: () => _edit(
-              (d) => d.copyWith(
-                education: [...d.education]..removeWhere((x) => x.id == e.id),
-              ),
-            ),
-            children: [
-              ResumeTextField(
-                label: 'Institution',
-                value: e.institution,
-                onChanged: (v) =>
-                    _editEducation(e.id, (x) => x.copyWith(institution: v)),
-              ),
-              ResumeTextField(
-                label: 'Degree',
-                value: e.degree,
-                onChanged: (v) =>
-                    _editEducation(e.id, (x) => x.copyWith(degree: v)),
-              ),
-              ResumeTextField(
-                label: 'Field of study',
-                value: e.field,
-                onChanged: (v) =>
-                    _editEducation(e.id, (x) => x.copyWith(field: v)),
-              ),
-              Row(
+        FormSectionCard(
+          icon: Icons.work_outline,
+          tone: SectionTone.experience,
+          title: 'Experience',
+          subtitle: data.experiences.isEmpty ? 'No roles added yet' : null,
+          children: [
+            for (final (i, e) in data.experiences.indexed)
+              EntryGroup(
+                key: ValueKey(e.id),
+                title: 'ROLE ${i + 1}',
+                removeTooltip: 'Remove this role',
+                onRemove: () => _edit(
+                  (d) => d.copyWith(
+                    experiences: [...d.experiences]
+                      ..removeWhere((x) => x.id == e.id),
+                  ),
+                ),
                 children: [
-                  Expanded(
-                    child: MonthYearField(
-                      label: 'Start',
-                      value: e.startDate,
-                      onChanged: (v) =>
-                          _editEducation(e.id, (x) => x.copyWith(startDate: v)),
+                  ResumeTextField(
+                    label: 'Position',
+                    value: e.position,
+                    onChanged: (v) =>
+                        _editExperience(e.id, (x) => x.copyWith(position: v)),
+                  ),
+                  ResumeTextField(
+                    label: 'Company',
+                    value: e.company,
+                    onChanged: (v) =>
+                        _editExperience(e.id, (x) => x.copyWith(company: v)),
+                  ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: MonthYearField(
+                          label: 'Start',
+                          value: e.startDate,
+                          onChanged: (v) => _editExperience(
+                            e.id,
+                            (x) => x.copyWith(startDate: v),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: tokens.spaceMd),
+                      Expanded(
+                        child: MonthYearField(
+                          label: 'End',
+                          value: e.endDate,
+                          enabled: !e.current,
+                          // The switch below turns this field off, and a field
+                          // that has gone quiet with no explanation reads as
+                          // broken. This says what the PDF will print instead.
+                          disabledHelper: 'Shows “Present”',
+                          onChanged: (v) => _editExperience(
+                            e.id,
+                            (x) => x.copyWith(endDate: v),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: e.current,
+                    title: const Text('I currently work here'),
+                    onChanged: (v) => _editExperience(
+                      e.id,
+                      // Clearing the end date matters: a stale value would keep
+                      // rendering behind the "Present" label in the PDF.
+                      (x) =>
+                          x.copyWith(current: v, endDate: v ? '' : x.endDate),
                     ),
                   ),
-                  SizedBox(width: context.tokens.spaceMd),
-                  Expanded(
-                    child: MonthYearField(
-                      label: 'End',
-                      value: e.endDate,
-                      onChanged: (v) =>
-                          _editEducation(e.id, (x) => x.copyWith(endDate: v)),
+                  ResumeTextField(
+                    label: 'What you did',
+                    value: e.description,
+                    maxLines: 4,
+                    onChanged: (v) => _editExperience(
+                      e.id,
+                      (x) => x.copyWith(description: v),
                     ),
                   ),
                 ],
               ),
-            ],
-          ),
-        AddEntryButton(
-          label: 'Add education',
-          onPressed: () => _edit(
-            (d) => d.copyWith(
-              education: [
-                ...d.education,
-                Education(id: _newId('edu')),
-              ],
+            SizedBox(height: tokens.spaceSm),
+            AddEntryButton(
+              label: 'Add role',
+              onPressed: () => _edit(
+                (d) => d.copyWith(
+                  experiences: [
+                    ...d.experiences,
+                    Experience(id: _newId('exp')),
+                  ],
+                ),
+              ),
             ),
-          ),
+          ],
         ),
 
-        SectionHeader(
+        FormSectionCard(
+          icon: Icons.school_outlined,
+          tone: SectionTone.education,
+          title: 'Education',
+          subtitle: data.education.isEmpty ? 'No education added yet' : null,
+          children: [
+            for (final (i, e) in data.education.indexed)
+              EntryGroup(
+                key: ValueKey(e.id),
+                title: 'EDUCATION ${i + 1}',
+                removeTooltip: 'Remove this entry',
+                onRemove: () => _edit(
+                  (d) => d.copyWith(
+                    education: [...d.education]
+                      ..removeWhere((x) => x.id == e.id),
+                  ),
+                ),
+                children: [
+                  ResumeTextField(
+                    label: 'Institution',
+                    value: e.institution,
+                    onChanged: (v) =>
+                        _editEducation(e.id, (x) => x.copyWith(institution: v)),
+                  ),
+                  ResumeTextField(
+                    label: 'Degree',
+                    value: e.degree,
+                    onChanged: (v) =>
+                        _editEducation(e.id, (x) => x.copyWith(degree: v)),
+                  ),
+                  ResumeTextField(
+                    label: 'Field of study',
+                    value: e.field,
+                    onChanged: (v) =>
+                        _editEducation(e.id, (x) => x.copyWith(field: v)),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: MonthYearField(
+                          label: 'Start',
+                          value: e.startDate,
+                          onChanged: (v) => _editEducation(
+                            e.id,
+                            (x) => x.copyWith(startDate: v),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: tokens.spaceMd),
+                      Expanded(
+                        child: MonthYearField(
+                          label: 'End',
+                          value: e.endDate,
+                          onChanged: (v) => _editEducation(
+                            e.id,
+                            (x) => x.copyWith(endDate: v),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            SizedBox(height: tokens.spaceSm),
+            AddEntryButton(
+              label: 'Add education',
+              onPressed: () => _edit(
+                (d) => d.copyWith(
+                  education: [
+                    ...d.education,
+                    Education(id: _newId('edu')),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+
+        FormSectionCard(
+          icon: Icons.bolt_outlined,
+          tone: SectionTone.skills,
           title: 'Skills',
           subtitle:
               'Rated out of five. Some designs show the rating, some just the name.',
-        ),
-        for (final s in data.skills)
-          EntryCard(
-            key: ValueKey(s.id),
-            title: s.name.isEmpty ? 'SKILL' : s.name.toUpperCase(),
-            removeTooltip: 'Remove this skill',
-            onRemove: () => _edit(
-              (d) => d.copyWith(
-                skills: [...d.skills]..removeWhere((x) => x.id == s.id),
+          children: [
+            for (final s in data.skills)
+              EntryGroup(
+                key: ValueKey(s.id),
+                title: s.name.isEmpty ? 'SKILL' : s.name.toUpperCase(),
+                removeTooltip: 'Remove this skill',
+                onRemove: () => _edit(
+                  (d) => d.copyWith(
+                    skills: [...d.skills]..removeWhere((x) => x.id == s.id),
+                  ),
+                ),
+                children: [
+                  ResumeTextField(
+                    label: 'Skill',
+                    value: s.name,
+                    onChanged: (v) =>
+                        _editSkill(s.id, (x) => x.copyWith(name: v)),
+                  ),
+                  _SkillSlider(
+                    value: s.level,
+                    onChanged: (v) =>
+                        _editSkill(s.id, (x) => x.copyWith(level: v)),
+                  ),
+                ],
+              ),
+            SizedBox(height: tokens.spaceSm),
+            AddEntryButton(
+              label: 'Add skill',
+              onPressed: () => _edit(
+                (d) => d.copyWith(
+                  skills: [
+                    ...d.skills,
+                    Skill(id: _newId('sk')),
+                  ],
+                ),
               ),
             ),
-            children: [
-              ResumeTextField(
-                label: 'Skill',
-                value: s.name,
-                onChanged: (v) => _editSkill(s.id, (x) => x.copyWith(name: v)),
-              ),
-              _SkillSlider(
-                value: s.level,
-                onChanged: (v) => _editSkill(s.id, (x) => x.copyWith(level: v)),
-              ),
-            ],
-          ),
-        AddEntryButton(
-          label: 'Add skill',
-          onPressed: () => _edit(
-            (d) => d.copyWith(
-              skills: [
-                ...d.skills,
-                Skill(id: _newId('sk')),
-              ],
-            ),
-          ),
-        ),
-
-        SectionHeader(title: 'Projects'),
-        for (final p in data.projects)
-          EntryCard(
-            key: ValueKey(p.id),
-            title: p.name.isEmpty ? 'PROJECT' : p.name.toUpperCase(),
-            removeTooltip: 'Remove this project',
-            onRemove: () => _edit(
-              (d) => d.copyWith(
-                projects: [...d.projects]..removeWhere((x) => x.id == p.id),
-              ),
-            ),
-            children: [
-              ResumeTextField(
-                label: 'Name',
-                value: p.name,
-                onChanged: (v) =>
-                    _editProject(p.id, (x) => x.copyWith(name: v)),
-              ),
-              ResumeTextField(
-                label: 'Description',
-                value: p.description,
-                maxLines: 3,
-                onChanged: (v) =>
-                    _editProject(p.id, (x) => x.copyWith(description: v)),
-              ),
-              ResumeTextField(
-                label: 'Technologies',
-                value: p.technologies,
-                helper: 'Comma separated — each becomes a chip.',
-                onChanged: (v) =>
-                    _editProject(p.id, (x) => x.copyWith(technologies: v)),
-              ),
-              ResumeTextField(
-                label: 'Link',
-                value: p.link,
-                keyboardType: TextInputType.url,
-                textCapitalization: TextCapitalization.none,
-                onChanged: (v) =>
-                    _editProject(p.id, (x) => x.copyWith(link: v)),
-              ),
-            ],
-          ),
-        AddEntryButton(
-          label: 'Add project',
-          onPressed: () => _edit(
-            (d) => d.copyWith(
-              projects: [
-                ...d.projects,
-                Project(id: _newId('prj')),
-              ],
-            ),
-          ),
+          ],
         ),
 
-        SectionHeader(
+        FormSectionCard(
+          icon: Icons.rocket_launch_outlined,
+          tone: SectionTone.projects,
+          title: 'Projects',
+          subtitle: data.projects.isEmpty ? 'No projects added yet' : null,
+          children: [
+            for (final p in data.projects)
+              EntryGroup(
+                key: ValueKey(p.id),
+                title: p.name.isEmpty ? 'PROJECT' : p.name.toUpperCase(),
+                removeTooltip: 'Remove this project',
+                onRemove: () => _edit(
+                  (d) => d.copyWith(
+                    projects: [...d.projects]..removeWhere((x) => x.id == p.id),
+                  ),
+                ),
+                children: [
+                  ResumeTextField(
+                    label: 'Name',
+                    value: p.name,
+                    onChanged: (v) =>
+                        _editProject(p.id, (x) => x.copyWith(name: v)),
+                  ),
+                  ResumeTextField(
+                    label: 'Description',
+                    value: p.description,
+                    maxLines: 3,
+                    onChanged: (v) =>
+                        _editProject(p.id, (x) => x.copyWith(description: v)),
+                  ),
+                  ResumeTextField(
+                    label: 'Technologies',
+                    value: p.technologies,
+                    helper: 'Comma separated — each becomes a chip.',
+                    onChanged: (v) =>
+                        _editProject(p.id, (x) => x.copyWith(technologies: v)),
+                  ),
+                  ResumeTextField(
+                    label: 'Link',
+                    value: p.link,
+                    keyboardType: TextInputType.url,
+                    textCapitalization: TextCapitalization.none,
+                    onChanged: (v) =>
+                        _editProject(p.id, (x) => x.copyWith(link: v)),
+                  ),
+                ],
+              ),
+            SizedBox(height: tokens.spaceSm),
+            AddEntryButton(
+              label: 'Add project',
+              onPressed: () => _edit(
+                (d) => d.copyWith(
+                  projects: [
+                    ...d.projects,
+                    Project(id: _newId('prj')),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+
+        FormSectionCard(
+          icon: Icons.dashboard_customize_outlined,
+          tone: SectionTone.custom,
           title: 'Custom sections',
           subtitle: 'Certifications, publications, languages — anything else.',
-        ),
-        for (final section in data.customSections)
-          EntryCard(
-            key: ValueKey(section.id),
-            title: section.sectionTitle.isEmpty
-                ? 'SECTION'
-                : section.sectionTitle.toUpperCase(),
-            removeTooltip: 'Remove this section',
-            onRemove: () => _edit(
-              (d) => d.copyWith(
-                customSections: [...d.customSections]
-                  ..removeWhere((x) => x.id == section.id),
-              ),
-            ),
-            children: [
-              ResumeTextField(
-                label: 'Section title',
-                value: section.sectionTitle,
-                onChanged: (v) => _editSection(
-                  section.id,
-                  (x) => x.copyWith(sectionTitle: v),
-                ),
-              ),
-              for (final item in section.items)
-                Padding(
-                  key: ValueKey(item.id),
-                  padding: EdgeInsets.only(bottom: context.tokens.spaceSm),
-                  child: Column(
-                    children: [
-                      ResumeTextField(
-                        label: 'Title',
-                        value: item.title,
-                        onChanged: (v) => _editSectionItem(
-                          section.id,
-                          item.id,
-                          (x) => x.copyWith(title: v),
-                        ),
-                      ),
-                      ResumeTextField(
-                        label: 'Subtitle',
-                        value: item.subtitle,
-                        onChanged: (v) => _editSectionItem(
-                          section.id,
-                          item.id,
-                          (x) => x.copyWith(subtitle: v),
-                        ),
-                      ),
-                    ],
+          children: [
+            for (final section in data.customSections)
+              EntryGroup(
+                key: ValueKey(section.id),
+                title: section.sectionTitle.isEmpty
+                    ? 'SECTION'
+                    : section.sectionTitle.toUpperCase(),
+                removeTooltip: 'Remove this section',
+                onRemove: () => _edit(
+                  (d) => d.copyWith(
+                    customSections: [...d.customSections]
+                      ..removeWhere((x) => x.id == section.id),
                   ),
                 ),
-              AddEntryButton(
-                label: 'Add item',
-                onPressed: () => _editSection(
-                  section.id,
-                  (x) => x.copyWith(
-                    items: [
-                      ...x.items,
-                      CustomItem(id: _newId('ci')),
-                    ],
+                children: [
+                  ResumeTextField(
+                    label: 'Section title',
+                    value: section.sectionTitle,
+                    onChanged: (v) => _editSection(
+                      section.id,
+                      (x) => x.copyWith(sectionTitle: v),
+                    ),
                   ),
+                  for (final item in section.items)
+                    Padding(
+                      key: ValueKey(item.id),
+                      padding: EdgeInsets.only(bottom: tokens.spaceSm),
+                      child: Column(
+                        children: [
+                          ResumeTextField(
+                            label: 'Title',
+                            value: item.title,
+                            onChanged: (v) => _editSectionItem(
+                              section.id,
+                              item.id,
+                              (x) => x.copyWith(title: v),
+                            ),
+                          ),
+                          ResumeTextField(
+                            label: 'Subtitle',
+                            value: item.subtitle,
+                            onChanged: (v) => _editSectionItem(
+                              section.id,
+                              item.id,
+                              (x) => x.copyWith(subtitle: v),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  AddEntryButton(
+                    label: 'Add item',
+                    onPressed: () => _editSection(
+                      section.id,
+                      (x) => x.copyWith(
+                        items: [
+                          ...x.items,
+                          CustomItem(id: _newId('ci')),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            SizedBox(height: tokens.spaceSm),
+            AddEntryButton(
+              label: 'Add section',
+              onPressed: () => _edit(
+                (d) => d.copyWith(
+                  customSections: [
+                    ...d.customSections,
+                    CustomSection(id: _newId('cs')),
+                  ],
                 ),
               ),
-            ],
-          ),
-        AddEntryButton(
-          label: 'Add section',
-          onPressed: () => _edit(
-            (d) => d.copyWith(
-              customSections: [
-                ...d.customSections,
-                CustomSection(id: _newId('cs')),
-              ],
             ),
-          ),
+          ],
         ),
       ],
     );
@@ -837,41 +1278,95 @@ class _SkillSlider extends StatelessWidget {
     'Expert',
   ];
 
+  /// Most of the row the word is allowed to take. Past this the slider stops
+  /// being something anyone can aim at.
+  static const _maxLabelFraction = 0.45;
+
+  /// Width the widest rating word needs at the current text size.
+  ///
+  /// This used to be a flat 68px, which is a fixed graphic's worth of space
+  /// given to a line of copy: at double text size "Strong" did not fit, and
+  /// because it is one word it could not wrap either — it broke mid-word into
+  /// "Stron / g" and the second line spilled up over the slider above. The
+  /// widest label is laid out with the real style at the real scale, the same
+  /// way the home screen's quick actions measure theirs, so the box is right at
+  /// every text size instead of at one of them.
+  static double _labelWidth(BuildContext context, TextStyle? style) {
+    final scaler = MediaQuery.textScalerOf(context);
+    final direction = Directionality.of(context);
+    var width = 0.0;
+    for (final label in _labels) {
+      final painter = TextPainter(
+        text: TextSpan(text: label, style: style),
+        textScaler: scaler,
+        maxLines: 1,
+        textDirection: direction,
+      )..layout();
+      width = math.max(width, painter.width);
+      painter.dispose();
+    }
+    return width;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final tokens = context.tokens;
     final clamped = value.clamp(0, 5);
+    final style = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
 
-    return Row(
-      children: [
-        Expanded(
-          child: Slider(
-            value: clamped.toDouble(),
-            min: 0,
-            max: 5,
-            divisions: 5,
-            // Screen readers announce the word, not a bare number, which on
-            // its own says nothing about what "3" means.
-            label: _labels[clamped],
-            onChanged: (v) => onChanged(v.round()),
-          ),
-        ),
-        SizedBox(
-          width: 68,
-          child: Text(
-            _labels[clamped],
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wanted = _labelWidth(context, style) + tokens.spaceSm;
+        final width = math.min(
+          wanted,
+          constraints.maxWidth * _maxLabelFraction,
+        );
+
+        return Row(
+          children: [
+            Expanded(
+              child: Slider(
+                value: clamped.toDouble(),
+                min: 0,
+                max: 5,
+                divisions: 5,
+                // Screen readers announce the word, not a bare number, which
+                // on its own says nothing about what "3" means.
+                label: _labels[clamped],
+                onChanged: (v) => onChanged(v.round()),
+              ),
             ),
-          ),
-        ),
-      ],
+            SizedBox(
+              width: width,
+              child: Text(
+                _labels[clamped],
+                // Belt and braces: if the cap ever bites, the word ellipsizes
+                // on one line rather than splitting across two.
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
 
-class _PhotoRow extends StatelessWidget {
-  const _PhotoRow({
+/// The photo, its explanation, and the actions that change it, as one object.
+///
+/// Previously an avatar and a button floating above the first text field, with
+/// nothing to say what they belonged to. Housed in the same well the fields are
+/// punched into so it reads as part of the "About you" group, with the avatar
+/// raised back up to a lighter tint so it still stands out as the subject of
+/// the controls beneath it.
+class _PhotoTile extends StatelessWidget {
+  const _PhotoTile({
     required this.photo,
     required this.onPick,
     required this.onRemove,
@@ -881,54 +1376,269 @@ class _PhotoRow extends StatelessWidget {
   final VoidCallback onPick;
   final VoidCallback onRemove;
 
+  static const _avatarSize = 64.0;
+
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
     final theme = Theme.of(context);
     final has = photo != null;
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: tokens.spaceLg),
-      child: Row(
+    return Container(
+      padding: EdgeInsets.all(tokens.spaceLg),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(tokens.radiusMd),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: theme.colorScheme.surfaceContainerHigh,
-              border: Border.all(color: theme.colorScheme.outlineVariant),
-              image: has
-                  ? DecorationImage(
-                      image: MemoryImage(photo),
-                      fit: BoxFit.cover,
-                    )
-                  : null,
-            ),
-            child: has
-                ? null
-                : Icon(
-                    Icons.person_outline,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-          ),
-          SizedBox(width: tokens.spaceLg),
-          Expanded(
-            child: Wrap(
-              spacing: tokens.spaceSm,
-              runSpacing: tokens.spaceSm,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: onPick,
-                  icon: const Icon(Icons.add_a_photo_outlined, size: 18),
-                  label: Text(has ? 'Replace photo' : 'Add photo'),
+          Row(
+            children: [
+              Container(
+                width: _avatarSize,
+                height: _avatarSize,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  // Raised out of the well it sits in, not sunk further into
+                  // it: an empty avatar drawn in the same tint as its
+                  // surroundings is a hole, not a placeholder.
+                  color: theme.colorScheme.surfaceContainerHigh,
+                  // The visible outline, not the decorative hairline: this
+                  // circle is the subject of the actions below it, and a tint
+                  // step alone leaves it with no edge to speak of.
+                  border: Border.all(color: theme.colorScheme.outline),
+                  image: has
+                      ? DecorationImage(
+                          image: MemoryImage(photo),
+                          fit: BoxFit.cover,
+                        )
+                      : null,
                 ),
-                if (has)
-                  TextButton(onPressed: onRemove, child: const Text('Remove')),
-              ],
-            ),
+                child: has
+                    ? null
+                    : Icon(
+                        Icons.person_outline,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+              ),
+              SizedBox(width: tokens.spaceLg),
+              // The copy takes the remaining width and wraps: at double text
+              // size a fixed row of avatar plus two lines is the first thing
+              // on this screen that would run off the edge.
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Photo',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    SizedBox(height: tokens.spaceXs / 2),
+                    Text(
+                      'Optional — not every design shows one.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: tokens.spaceMd),
+          // Below the row rather than beside it: a button sharing the row with
+          // the avatar and the copy has nowhere left to go once either grows.
+          Wrap(
+            spacing: tokens.spaceSm,
+            runSpacing: tokens.spaceSm,
+            children: [
+              OutlinedButton.icon(
+                onPressed: onPick,
+                icon: const Icon(Icons.add_a_photo_outlined, size: 18),
+                label: Text(
+                  has ? 'Replace photo' : 'Add photo',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (has)
+                TextButton(onPressed: onRemove, child: const Text('Remove')),
+            ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Where a photo comes from.
+enum _PhotoSource { camera, gallery }
+
+/// Where a finished PDF goes.
+enum _ExportDestination { share, save }
+
+/// One row of a chooser sheet.
+class _ChooserOption<T> {
+  const _ChooserOption({
+    required this.value,
+    required this.icon,
+    required this.label,
+    required this.description,
+  });
+
+  final T value;
+  final IconData icon;
+
+  /// The action, in the user's words. Lives in a real [Text], never in a
+  /// tooltip: a tooltip is unreachable by touch and by TalkBack.
+  final String label;
+
+  /// One line saying what picking this actually does.
+  final String description;
+}
+
+/// Asks the user to pick one of [options].
+///
+/// The app's two choosers — photo source and export destination — are the same
+/// object with different rows, so they are the same *pattern* rather than two
+/// separate inventions: a modal sheet, a heading, and one full-width row per
+/// option carrying a recessed mark, the action, and a line explaining it.
+///
+/// A sheet rather than a dialog because both choices are a branch in a flow the
+/// user has already committed to, not a question about it, and because a sheet
+/// puts its rows at the bottom of a phone screen where a thumb already is.
+/// Everything about its shape — the raised tier, the flat edge, the drag
+/// handle, the corner radius — comes from `bottomSheetTheme`.
+///
+/// Returns null when the user dismisses it by the handle, the barrier or the
+/// back gesture, which every caller must treat as "changed their mind".
+///
+/// **Only ever opened with two or more options.** A sheet holding a single row
+/// is a tap charged for a choice that does not exist, so a caller whose second
+/// option is unavailable on this device goes straight to the one that is left —
+/// see the `supportsCamera` and `canSaveToDisk` gates at the call sites.
+Future<T?> _showChooser<T>(
+  BuildContext context, {
+  required String title,
+  required List<_ChooserOption<T>> options,
+}) {
+  return showModalBottomSheet<T>(
+    context: context,
+    // Both together are what keep two rows of supporting text safe at double
+    // text size: the sheet may grow past the default 9/16 of the screen, and
+    // `useSafeArea` stops a grown sheet sliding under the status bar or the
+    // notch. In landscape at 2x the content is taller than the viewport, and
+    // the scroll view inside the sheet is what carries it.
+    isScrollControlled: true,
+    useSafeArea: true,
+    // A sheet spanning a 768px tablet leaves each row's copy stranded beside a
+    // hand's width of empty space. Matches the form's own measure.
+    constraints: const BoxConstraints(maxWidth: _maxFormWidth),
+    builder: (context) => _ChooserSheet(title: title, options: options),
+  );
+}
+
+class _ChooserSheet<T> extends StatelessWidget {
+  const _ChooserSheet({required this.title, required this.options});
+
+  final String title;
+  final List<_ChooserOption<T>> options;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tokens = context.tokens;
+
+    return SafeArea(
+      // The route already holds the top edge clear (`useSafeArea`); taking it
+      // again here would pad the sheet twice. The bottom is this widget's own
+      // problem — the last row must clear the gesture bar.
+      top: false,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                tokens.spaceLg,
+                0,
+                tokens.spaceLg,
+                tokens.spaceSm,
+              ),
+              child: Semantics(
+                header: true,
+                child: Text(
+                  title,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    // Large and tight, matching the app bar and the form's
+                    // section headings.
+                    letterSpacing: -0.2,
+                  ),
+                ),
+              ),
+            ),
+            for (final option in options)
+              _ChooserRow<T>(
+                option: option,
+                onTap: () => Navigator.of(context).pop(option.value),
+              ),
+            SizedBox(height: tokens.spaceMd),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One option, as a row.
+///
+/// A [ListTile] rather than a hand-built row: it already resolves the minimum
+/// tile height, the leading gap and the ink shape from `listTileTheme`, it
+/// carries its own button semantics and tap action, and it grows vertically
+/// when the description wraps at large text sizes rather than clipping it.
+class _ChooserRow<T> extends StatelessWidget {
+  const _ChooserRow({required this.option, required this.onTap});
+
+  final _ChooserOption<T> option;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tokens = context.tokens;
+
+    // One node, not three. Unmerged, a screen reader makes the label and its
+    // supporting line two separate stops either side of the button, so the
+    // explanation is read apart from the thing it explains.
+    return MergeSemantics(
+      child: Padding(
+        // Inset so the themed rounded highlight has an edge to sit inside
+        // instead of running into the sheet's own. Row inset plus content
+        // padding comes to `spaceLg`, which lines the mark up under the
+        // heading.
+        padding: EdgeInsets.symmetric(horizontal: tokens.spaceSm),
+        child: ListTile(
+          onTap: onTap,
+          contentPadding: EdgeInsets.symmetric(
+            horizontal: tokens.spaceSm,
+            vertical: tokens.spaceSm,
+          ),
+          // The same recessed plate that introduces every section of the form:
+          // `surfaceContainerLowest` with the accent glyph on it. The
+          // established treatment for a mark nested in a raised surface,
+          // reused rather than reinvented a third time.
+          leading: SectionIconTile(icon: option.icon),
+          title: Text(option.label),
+          subtitle: Text(option.description),
+          subtitleTextStyle: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
       ),
     );
   }
@@ -939,6 +1649,9 @@ class _PhotoRow extends StatelessWidget {
 ///
 /// Uses the error container rather than a warning yellow: content missing from
 /// a resume someone is about to send is a failure, not a hint.
+///
+/// Renders nothing at all when there is nothing to report, rather than being
+/// left out of its parent's child list — see the note at the call site.
 class _TruncationBanner extends StatelessWidget {
   const _TruncationBanner({required this.report});
 
@@ -948,6 +1661,10 @@ class _TruncationBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final tokens = context.tokens;
+
+    // Zero height, and nothing in the semantics tree either: a screen reader
+    // must not stop on an empty warning.
+    if (!report.hasLoss) return const SizedBox.shrink();
 
     return Material(
       color: theme.colorScheme.errorContainer,
