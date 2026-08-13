@@ -97,8 +97,13 @@ flutter:
   # the Flutter splash paints its mark with a CustomPainter so it can take its
   # colours from the theme — so bundling them would be half a megabyte of dead
   # weight in every APK.
+  #
+  # `assets/vendor/` is different: it holds the developer's own logo, shipped
+  # as an image because it is somebody else's mark and must not be redrawn,
+  # approximated, or recoloured by this app.
   assets:
     - assets/fonts/
+    - assets/vendor/
 
   # Registered as a real Flutter font family, not just a PDF asset. Without
   # this the app falls back to Roboto, which Flutter web fetches from

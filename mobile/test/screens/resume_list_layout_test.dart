@@ -2,8 +2,12 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+// `RenderParagraph` is how a test asks whether a line was actually cut short;
+// `widgets.dart` does not re-export it.
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:resume_forge/brand.dart';
 import 'package:resume_forge/data/resume_repository.dart';
 import 'package:resume_forge/models/resume.dart';
 import 'package:resume_forge/screens/about_screen.dart';
@@ -53,6 +57,17 @@ void main() {
   /// The one supporting line under the title. Spelled out here rather than read
   /// off the private widget, so a copy edit has to be a deliberate one.
   const greetingText = 'Welcome back. Pick up where you left off.';
+
+  /// The product name in the title row. It is rich text — one letter of it
+  /// carries the brand's accent — so it is addressed the way rich text has to
+  /// be.
+  final wordmark = find.text(appName, findRichText: true);
+
+  /// The information button, which shares that row with it.
+  final aboutButton = find.ancestor(
+    of: find.byIcon(Icons.info_outline),
+    matching: find.byType(IconButton),
+  );
 
   /// The empty state's hero: one solid disc, addressed by key.
   ///
@@ -245,9 +260,9 @@ void main() {
       final repo = await seeded(tester, const []);
       await pumpList(tester, const Size(390, 844), repo: repo);
 
-      expect(find.text(Wordmark.text), findsOneWidget);
+      expect(wordmark, findsOneWidget);
       expect(
-        tester.getTopLeft(find.text(Wordmark.text)).dy,
+        tester.getTopLeft(wordmark).dy,
         lessThan(tester.getTopLeft(find.text('No resumes yet')).dy),
         reason:
             'it is the screen title above the hero, not a footnote under it',
@@ -262,7 +277,7 @@ void main() {
       final repo = await seeded(tester, const []);
       await pumpList(tester, const Size(800, 360), repo: repo, textScale: 2);
 
-      expect(find.text(Wordmark.text), findsOneWidget);
+      expect(wordmark, findsOneWidget);
       await tester.drag(find.text('No resumes yet'), const Offset(0, -200));
       await tester.pumpAndSettle();
       expect(find.text('Create your first resume'), findsOneWidget);
@@ -345,7 +360,7 @@ void main() {
       // by a name — including the name on the resume they happen to have saved.
       expect(find.textContaining('Amara', findRichText: true), findsOneWidget);
       expect(find.byType(AppBar), findsNothing);
-      expect(find.text(Wordmark.text), findsOneWidget);
+      expect(wordmark, findsOneWidget);
     });
 
     /// The header used to stack four lines of chrome above the first resume:
@@ -356,7 +371,7 @@ void main() {
       final repo = await seeded(tester, [docNamed('a', 'Amara Okonkwo')]);
       await pumpList(tester, const Size(390, 844), repo: repo);
 
-      final title = tester.getRect(find.text(Wordmark.text));
+      final title = tester.getRect(wordmark);
       final greeting = tester.getRect(find.text(greetingText));
       final firstCard = tester.getRect(
         find.ancestor(
@@ -504,7 +519,7 @@ void main() {
           final repo = await seeded(tester, [docNamed('a', longName)]);
           await pumpList(tester, entry.value, repo: repo, textScale: scale);
 
-          expect(find.text(Wordmark.text), findsOneWidget);
+          expect(wordmark, findsOneWidget);
           expect(find.byIcon(Icons.info_outline), findsOneWidget);
           expect(find.text(greetingText), findsOneWidget);
           expect(find.text('Browse designs'), findsOneWidget);
@@ -638,16 +653,16 @@ void main() {
     testWidgets('names the product in every state', (tester) async {
       final populated = await seeded(tester, [docNamed('a', 'Amara Okonkwo')]);
       await pumpList(tester, const Size(390, 844), repo: populated);
-      expect(find.text(Wordmark.text), findsOneWidget);
+      expect(wordmark, findsOneWidget);
       expect(find.byIcon(Icons.info_outline), findsOneWidget);
 
       final empty = await seeded(tester, const []);
       await pumpList(tester, const Size(390, 844), repo: empty);
-      expect(find.text(Wordmark.text), findsOneWidget);
+      expect(wordmark, findsOneWidget);
       expect(find.byIcon(Icons.info_outline), findsOneWidget);
 
       await pumpList(tester, const Size(390, 844), repo: _BrokenRepository());
-      expect(find.text(Wordmark.text), findsOneWidget);
+      expect(wordmark, findsOneWidget);
       expect(
         find.byIcon(Icons.info_outline),
         findsOneWidget,
@@ -661,15 +676,10 @@ void main() {
       final repo = await seeded(tester, [docNamed('a', 'Amara Okonkwo')]);
       await pumpList(tester, const Size(390, 844), repo: repo);
 
-      final button = tester.widget<IconButton>(
-        find.ancestor(
-          of: find.byIcon(Icons.info_outline),
-          matching: find.byType(IconButton),
-        ),
-      );
+      final button = tester.widget<IconButton>(aboutButton);
       expect(
         button.tooltip,
-        'About ResumeForge',
+        'About $appName',
         reason: 'an icon-only control with no label is unusable by a reader',
       );
 
@@ -687,45 +697,110 @@ void main() {
       await tester.drag(find.byType(CustomScrollView), const Offset(0, -900));
       await tester.pumpAndSettle();
 
-      expect(find.text(Wordmark.text), findsOneWidget);
+      expect(wordmark, findsOneWidget);
       expect(find.byIcon(Icons.info_outline), findsOneWidget);
     });
 
     /// The case most likely to break: one unbreakable word beside a
     /// fixed-size icon button on the narrowest phone at the largest text size.
+    ///
+    /// This used to assert the *mechanism* — that the title clamped its own
+    /// text scaler at 1.6x — because "ResumeForge" is eleven characters and
+    /// could do nothing past that but ellipsize into "ResumeForg…". The clamp
+    /// is gone with the rename: "Resivo" is six characters and fits this row
+    /// unscaled well past 3x, so what is asserted now is the outcome the clamp
+    /// existed to buy. If the name ever grows again, this fails first.
     testWidgets('the title shares its row at 2x text on a small phone', (
       tester,
     ) async {
       final repo = await seeded(tester, [docNamed('a', 'Amara Okonkwo')]);
       await pumpList(tester, const Size(360, 800), repo: repo, textScale: 2);
 
-      final title = tester.widget<Text>(find.text(Wordmark.text));
-      expect(
-        title.textScaler?.scale(10),
-        lessThanOrEqualTo(16),
-        reason: 'past ~1.6x the product name can only ellipsize',
+      final title = tester.widget<Text>(
+        find.descendant(of: find.byType(Wordmark), matching: find.byType(Text)),
       );
       expect(title.maxLines, 1);
-
-      final button = tester.getSize(
-        find.ancestor(
-          of: find.byIcon(Icons.info_outline),
-          matching: find.byType(IconButton),
-        ),
+      expect(
+        title.textScaler,
+        isNull,
+        reason: 'the name is short enough to scale with the system now',
       );
+      expect(
+        tester.renderObject<RenderParagraph>(wordmark).didExceedMaxLines,
+        isFalse,
+        reason: 'a product name cut in half is worse than a title that fits',
+      );
+
+      final button = tester.getSize(aboutButton);
       expect(button.width, greaterThanOrEqualTo(48));
       expect(button.height, greaterThanOrEqualTo(48));
 
       // The row fits inside the screen rather than running off it: a Row that
       // overflows throws, but a title that pushed the button off the edge
       // would not.
-      final row = tester.getRect(
-        find.ancestor(
-          of: find.byIcon(Icons.info_outline),
-          matching: find.byType(IconButton),
-        ),
+      expect(tester.getRect(aboutButton).right, lessThanOrEqualTo(360));
+    });
+
+    /// How far the uncapped title can actually be pushed.
+    ///
+    /// The row on its own, at the width the narrowest phone leaves it: 360 less
+    /// the 16px leading inset, the 8px trailing one and the 48px icon button.
+    /// The whole screen is not pumped here because the question is only whether
+    /// the name fits its own row.
+    ///
+    /// **This is a harder case than a device.** `flutter_test` draws every
+    /// glyph in its own fallback face, where each one is a full em square —
+    /// roughly twice Inter's advance for lowercase — so "Resivo" measures about
+    /// 264 of the 288px available at 2x here, against about 133px with the
+    /// typeface that actually ships. Clearing 2x under the test font is
+    /// therefore closer to clearing 4x on a phone, which is well past the ~3.1x
+    /// the largest iOS accessibility size asks for.
+    testWidgets('the name is not ellipsized even at an extreme text size', (
+      tester,
+    ) async {
+      for (final scale in const [1.0, 2.0]) {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.build(),
+            home: MediaQuery(
+              data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+              child: const Scaffold(
+                body: Align(
+                  alignment: Alignment.topLeft,
+                  child: SizedBox(width: 288, child: Wordmark()),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.renderObject<RenderParagraph>(wordmark).didExceedMaxLines,
+          isFalse,
+          reason: '"$appName" is cut short at ${scale}x on a 360px phone',
+        );
+      }
+    });
+
+    /// The brand's one colour, in the one place the app names itself in every
+    /// state — and taken from the scheme rather than from a literal.
+    testWidgets('the title carries the brand accent on one letter', (
+      tester,
+    ) async {
+      final repo = await seeded(tester, [docNamed('a', 'Amara Okonkwo')]);
+      await pumpList(tester, const Size(390, 844), repo: repo);
+
+      final title = tester.widget<Text>(
+        find.descendant(of: find.byType(Wordmark), matching: find.byType(Text)),
       );
-      expect(row.right, lessThanOrEqualTo(360));
+      expect(title.textSpan?.toPlainText(), appName);
+
+      final accented = (title.textSpan! as TextSpan).children!
+          .cast<TextSpan>()
+          .where((s) => s.style?.color != null);
+      expect(accented, hasLength(1));
+      expect(accented.single.style!.color, AppTheme.colorScheme.primary);
     });
   });
 

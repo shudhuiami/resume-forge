@@ -9,6 +9,26 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:resume_forge/screens/splash_screen.dart';
 import 'package:resume_forge/theme/app_theme.dart';
 
+/// Points on the mark's page that miss the fold and every piece of its
+/// content, and the points that land inside them.
+///
+/// Copied from `test/brand/brand_assets_test.dart`, which asks the same
+/// questions of the baked PNGs. Duplicated rather than shared because the two
+/// files are asserting that two independent drawings — one in Python, one in
+/// Dart — agree, and a shared constant would let them agree by construction.
+const _pageGaps = <({double fx, double fy})>[
+  (fx: 0.50, fy: 0.075),
+  (fx: 0.75, fy: 0.300),
+  (fx: 0.30, fy: 0.480),
+  (fx: 0.94, fy: 0.480),
+  (fx: 0.30, fy: 0.680),
+  (fx: 0.30, fy: 0.965),
+];
+const _portrait = (fx: 0.315, fy: 0.235);
+const _arrowShaft = (fx: 0.50, fy: 0.808);
+const _arrowHead = (fx: 0.86, fy: 0.72);
+const _foldCorner = (fx: 0.92, fy: 0.06);
+
 /// The viewports every screen in this app is reviewed at, plus a landscape
 /// phone, which is the one that runs out of height first.
 const _viewports = <String, Size>{
@@ -40,7 +60,7 @@ Future<void> _resize(WidgetTester tester, Size size) async {
 }
 
 double _markProgress(WidgetTester tester) =>
-    tester.widget<ForgeMark>(find.byType(ForgeMark)).progress;
+    tester.widget<ResivoMark>(find.byType(ResivoMark)).progress;
 
 /// The mark, rasterised, so what it *paints* can be asserted rather than what
 /// it was handed.
@@ -88,7 +108,7 @@ class _MarkPixels {
 Future<_MarkPixels> _rasterise(WidgetTester tester) async {
   final boundary = tester.renderObject<RenderRepaintBoundary>(
     find.descendant(
-      of: find.byType(ForgeMark),
+      of: find.byType(ResivoMark),
       matching: find.byType(RepaintBoundary),
     ),
   );
@@ -109,9 +129,9 @@ void main() {
       await tester.pumpWidget(_harness(const SplashScreen()));
       await tester.pump();
 
-      expect(find.byType(ForgeMark), findsOneWidget);
-      expect(find.byKey(forgeMarkKey), findsOneWidget);
-      expect(find.text('ResumeForge'), findsOneWidget);
+      expect(find.byType(ResivoMark), findsOneWidget);
+      expect(find.byKey(resivoMarkKey), findsOneWidget);
+      expect(find.text('Resivo'), findsOneWidget);
       expect(find.text('Everything stays on this device'), findsOneWidget);
     });
 
@@ -139,17 +159,13 @@ void main() {
       final pixels = await _rasterise(tester);
       const scheme = AppTheme.colorScheme;
 
-      // Five points spread over the page, all in the gaps between the content
-      // bars. A gradient could not hold one value across all of them — which is
-      // the property `assets/brand/generate_brand.py` bakes into the icon, and
-      // this is the Dart end of that agreement.
-      for (final gap in const [
-        (fx: 0.50, fy: 0.08),
-        (fx: 0.30, fy: 0.40),
-        (fx: 0.70, fy: 0.40),
-        (fx: 0.50, fy: 0.61),
-        (fx: 0.40, fy: 0.88),
-      ]) {
+      // Points spread over the page, all clear of the fold and of every piece
+      // of content. A gradient could not hold one value across all of them —
+      // which is the property `assets/brand/generate_brand.py` bakes into the
+      // icon, and this is the Dart end of that agreement. Same coordinates as
+      // `_pageGaps` in test/brand/brand_assets_test.dart, so the two ends are
+      // being asked the same question.
+      for (final gap in _pageGaps) {
         expect(
           pixels.at(pixels.onPage(gap.fx, gap.fy)),
           scheme.primary,
@@ -157,11 +173,27 @@ void main() {
         );
       }
 
-      // The bars read as holes punched back to the background behind the page.
+      // The portrait and the arrow read as holes punched back to the background
+      // behind the page.
+      for (final spot in const [_portrait, _arrowShaft, _arrowHead]) {
+        expect(
+          pixels.at(pixels.onPage(spot.fx, spot.fy)),
+          scheme.surface,
+          reason:
+              'the mark\'s contents are the surface colour showing through; '
+              '${spot.fx},${spot.fy} is not',
+        );
+      }
+
+      // The folded corner is cut out of the page's silhouette, so by the
+      // resting frame the mat behind it shows through.
       expect(
-        pixels.at(pixels.onPage(0.40, 0.27)),
-        scheme.surface,
-        reason: 'the content bars are the surface colour showing through',
+        pixels.at(pixels.onPage(_foldCorner.fx, _foldCorner.fy)),
+        scheme.surfaceContainerHigh,
+        reason:
+            'the top-right corner must be folded away, showing the mat behind '
+            'it — a square corner here means the Flutter mark and the launcher '
+            'icon have drifted apart',
       );
 
       // The mat: opaque, flat, and outside the page's own width.
@@ -184,12 +216,28 @@ void main() {
       // The page opens at 0.88 scale, so frame zero's geometry is scaled too.
       const scale = 0.88;
 
+      for (final spot in const [_portrait, _arrowShaft, _arrowHead]) {
+        expect(
+          pixels.at(pixels.onPage(spot.fx, spot.fy, scale: scale)),
+          scheme.primary,
+          reason:
+              'nothing written on the page yet: assets/brand/splash_logo.png '
+              'is the empty folded page, and anything already drawn at '
+              '${spot.fx},${spot.fy} would flicker at the handoff',
+        );
+      }
+
+      // The fold, though, *is* in the native image — it is silhouette rather
+      // than content — so it has to be here on frame zero too.
       expect(
-        pixels.at(pixels.onPage(0.40, 0.27, scale: scale)),
-        scheme.primary,
+        pixels
+            .at(pixels.onPage(_foldCorner.fx, _foldCorner.fy, scale: scale))
+            .a,
+        0,
         reason:
-            'no content bars yet: assets/brand/splash_logo.png is a blank '
-            'page, and a bar already drawn here would flicker at the handoff',
+            'the corner must already be folded on frame zero: '
+            'assets/brand/splash_logo.png is folded, so a square corner here '
+            'is a shape change at the handoff',
       );
       expect(
         pixels.at(pixels.onPage(1.07, 0.50, scale: scale)).a,
@@ -281,7 +329,7 @@ void main() {
       await tester.pumpWidget(_harness(const SizedBox.shrink()));
       await tester.pump();
 
-      expect(find.byType(ForgeMark), findsNothing);
+      expect(find.byType(ResivoMark), findsNothing);
       expect(
         SchedulerBinding.instance.transientCallbackCount,
         0,
@@ -303,9 +351,9 @@ void main() {
           await tester.pumpAndSettle();
 
           expect(tester.takeException(), isNull);
-          expect(find.text('ResumeForge'), findsOneWidget);
+          expect(find.text('Resivo'), findsOneWidget);
 
-          final mark = tester.getSize(find.byKey(forgeMarkKey));
+          final mark = tester.getSize(find.byKey(resivoMarkKey));
           expect(mark.height, greaterThan(0));
           expect(
             mark.width,
@@ -324,8 +372,8 @@ void main() {
         await tester.pumpWidget(_harness(const SplashScreen()));
         await tester.pumpAndSettle();
 
-        final box = tester.getSize(find.byKey(forgeMarkKey));
-        final expected = ForgeMark.boxSizeFor(box.height / 1.30);
+        final box = tester.getSize(find.byKey(resivoMarkKey));
+        final expected = ResivoMark.boxSizeFor(box.height / 1.30);
         expect(box.width, closeTo(expected.width, 0.5));
       }
     });

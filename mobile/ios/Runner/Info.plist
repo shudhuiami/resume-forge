@@ -7,7 +7,7 @@
 		<key>CFBundleDevelopmentRegion</key>
 		<string>$(DEVELOPMENT_LANGUAGE)</string>
 		<key>CFBundleDisplayName</key>
-		<string>ResumeForge</string>
+		<string>Resivo</string>
 		<key>CFBundleExecutable</key>
 		<string>$(EXECUTABLE_NAME)</string>
 		<key>CFBundleIdentifier</key>
@@ -15,7 +15,7 @@
 		<key>CFBundleInfoDictionaryVersion</key>
 		<string>6.0</string>
 		<key>CFBundleName</key>
-		<string>ResumeForge</string>
+		<string>Resivo</string>
 		<key>CFBundlePackageType</key>
 		<string>APPL</string>
 		<key>CFBundleShortVersionString</key>
@@ -34,9 +34,9 @@
 		     path no longer prompts for it. NSMicrophoneUsageDescription is
 		     deliberately absent: this app captures stills only. -->
 		<key>NSCameraUsageDescription</key>
-		<string>ResumeForge uses the camera so you can take a portrait photo to put on your resume.</string>
+		<string>Resivo uses the camera so you can take a portrait photo to put on your resume.</string>
 		<key>NSPhotoLibraryUsageDescription</key>
-		<string>ResumeForge needs access to your photo library so you can choose a portrait photo to put on your resume.</string>
+		<string>Resivo needs access to your photo library so you can choose a portrait photo to put on your resume.</string>
 		<key>UIApplicationSceneManifest</key>
 		<dict>
 			<key>UIApplicationSupportsMultipleScenes</key>

@@ -18,7 +18,7 @@
          No <queries> entry is needed either: the plugins launch their intents with
          startActivityForResult rather than resolving them first. -->
     <application
-        android:label="ResumeForge"
+        android:label="Resivo"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

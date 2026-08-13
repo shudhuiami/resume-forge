@@ -14,13 +14,14 @@ flutter_native_splash:
   color: "#0E0E10"
   color_dark: "#0E0E10"
 
-  # The mark's *first frame*: the page with no content bars and no mat. The
-  # Flutter splash opens on exactly this drawing and then writes the bars in
-  # and grows the mat behind it, so nothing visible changes hands — where a
-  # full logo here would mean the mark appeared, vanished for a beat, and
-  # animated back. 640px source, which this package treats as the 4x asset, so
-  # the page lands at 144dp: the size the Flutter splash's opening frame draws
-  # it at on a 390dp-wide phone.
+  # The mark's *first frame*: the folded page with nothing written on it and no
+  # mat. The Flutter splash opens on exactly this drawing and then places the
+  # portrait, writes the two lines in, draws the arrow out and grows the mat
+  # behind it, so nothing visible changes hands — where a full logo here would
+  # mean the mark appeared, vanished for a beat, and animated back. 640px
+  # source, which this package treats as the 4x asset, so the page lands at
+  # 144dp: the size the Flutter splash's opening frame draws it at on a
+  # 390dp-wide phone.
   image: assets/brand/splash_logo.png
   image_dark: assets/brand/splash_logo.png
 

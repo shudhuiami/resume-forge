@@ -85,7 +85,7 @@ install must uninstall first. **That destroys app storage**, including every
 saved resume. On a debug build the database can be pulled first:
 
 ```bash
-adb shell "run-as com.resumeforge.resume_forge cat app_flutter/resumes.hive" > resumes.hive.backup
+adb shell "run-as com.codevioso.resivo cat app_flutter/resumes.hive" > resumes.hive.backup
 ```
 
 `run-as` only works on debuggable builds, so this is a one-way door: you can

@@ -1,4 +1,4 @@
-# ResumeForge
+# Resivo
 
 A no-signup resume builder. Pick a design, fill in one form, watch a live
 preview, export a print-ready PDF. No accounts, no backend, no network — every
@@ -30,7 +30,7 @@ API keys, `.env` files, or services to start.
 ## Tests
 
 ```
-flutter test        # 281 tests
+flutter test        # 643 tests
 flutter analyze     # expected: no issues
 dart format .
 ```
@@ -96,7 +96,7 @@ mobile/
     templates/    13 designs + the registry that lists them
     screens/      resume list, gallery, editor
     widgets/      preview, form fields
-  test/           281 tests
+  test/           643 tests
   tool/           build_fonts.py — regenerates the bundled font cuts
 ```
 

@@ -17,7 +17,7 @@ Widget _app(
 }) {
   return MediaQuery(
     data: MediaQueryData(disableAnimations: reducedMotion),
-    child: ResumeForgeApp(startup: startup),
+    child: ResivoApp(startup: startup),
   );
 }
 

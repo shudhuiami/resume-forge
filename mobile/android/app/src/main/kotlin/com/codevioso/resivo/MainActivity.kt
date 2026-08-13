@@ -1,4 +1,4 @@
-package com.resumeforge.resume_forge
+package com.codevioso.resivo
 
 import io.flutter.embedding.android.FlutterActivity
 

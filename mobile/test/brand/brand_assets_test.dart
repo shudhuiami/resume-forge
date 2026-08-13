@@ -25,6 +25,21 @@ const _mark = Color(0xFFD8A657); // MARK — matte amber
 /// A4, mirrored from the generator and from `lib/screens/splash_screen.dart`.
 const _a4 = 1 / 1.4142135623730951;
 
+/// Every generated image that carries the mark, with the page fraction
+/// `assets/brand/generate_brand.py` drew it at.
+const _sources = <({String path, int canvas, double page})>[
+  (path: 'assets/brand/icon_foreground.png', canvas: 1024, page: 0.52),
+  (path: 'assets/brand/icon_master.png', canvas: 1024, page: 0.60),
+  (path: 'assets/brand/splash_logo.png', canvas: 640, page: 0.90),
+  (path: 'assets/brand/splash_android12.png', canvas: 1152, page: 0.50),
+];
+
+/// The two native splash sources, which are the mark's *first frame*.
+const _splashSources = <({String path, int canvas, double page})>[
+  (path: 'assets/brand/splash_logo.png', canvas: 640, page: 0.90),
+  (path: 'assets/brand/splash_android12.png', canvas: 1152, page: 0.50),
+];
+
 String _hex(Color color) {
   String part(double channel) =>
       (channel * 255).round().toRadixString(16).padLeft(2, '0');
@@ -60,18 +75,38 @@ img.Image _load(String path) {
   );
 }
 
-/// Points on the page that miss all three content bars.
+/// Points on the page that miss the fold and every piece of its content.
 ///
-/// The bars occupy y 0.200–0.340, 0.460–0.560 and 0.660–0.760, so these sit in
-/// the four gaps between and around them, spread across the width as well —
-/// enough spread that a gradient across the page could not pass.
+/// Six, spread into every band of the page the mark leaves clear: above the
+/// portrait, right of it under the fold, between the shoulders and the lower
+/// line, right of that line, between it and the arrow, and below the arrow's
+/// tail. Every one was checked against the generated PNGs with a margin of 1.5%
+/// of the page height in all directions, so an antialiased edge cannot be what
+/// makes them pass — and they are spread widely enough that a gradient across
+/// the page could not hold one value across all six.
 const _pageGaps = <({double fx, double fy})>[
-  (fx: 0.50, fy: 0.08),
-  (fx: 0.30, fy: 0.40),
-  (fx: 0.70, fy: 0.40),
-  (fx: 0.50, fy: 0.61),
-  (fx: 0.40, fy: 0.88),
+  (fx: 0.50, fy: 0.075),
+  (fx: 0.75, fy: 0.300),
+  (fx: 0.30, fy: 0.480),
+  (fx: 0.94, fy: 0.480),
+  (fx: 0.30, fy: 0.680),
+  (fx: 0.30, fy: 0.965),
 ];
+
+/// Dead centre of the portrait's head — the deepest point of the mark's
+/// content, 39px clear of an edge on a 1024px layer.
+const _portrait = (fx: 0.315, fy: 0.235);
+
+/// Inside the arrow: one point on the shaft, one in the head.
+const _arrowShaft = (fx: 0.50, fy: 0.808);
+const _arrowHead = (fx: 0.86, fy: 0.72);
+
+/// Inside the folded corner.
+///
+/// The crease runs 45 degrees from (0.66, 0) to (1.0, 0.24), so this sits well
+/// beyond it. Unlike the content, the fold is part of the mark's *silhouette*,
+/// so it is cut away on the native splash frames too.
+const _foldCorner = (fx: 0.92, fy: 0.06);
 
 /// Exact-match assertion. Not approximate on purpose: the mark is one flat
 /// colour over a flat backdrop, so every interior pixel is that colour to the
@@ -216,12 +251,7 @@ void main() {
     });
 
     test('the mark is one solid colour, on every layer that is coloured', () {
-      for (final source in const [
-        (path: 'assets/brand/icon_foreground.png', canvas: 1024, page: 0.52),
-        (path: 'assets/brand/icon_master.png', canvas: 1024, page: 0.60),
-        (path: 'assets/brand/splash_logo.png', canvas: 640, page: 0.90),
-        (path: 'assets/brand/splash_android12.png', canvas: 1152, page: 0.50),
-      ]) {
+      for (final source in _sources) {
         final image = _load(source.path);
         for (final gap in _pageGaps) {
           _expectPixel(
@@ -230,42 +260,79 @@ void main() {
             _mark,
             reason:
                 '${source.path}: every point of the page is the same matte '
-                'amber. Five points spread across it cannot all match if the '
+                'amber. Six points spread across it cannot all match if the '
                 'fill has gone back to a ramp',
           );
         }
       }
     });
 
-    test('the content bars are punched through to the layer behind', () {
-      // A point inside the header bar: bar fractions from generate_brand.py.
-      const spot = (fx: 0.40, fy: 0.27);
-
-      // On the adaptive foreground the bars are holes, so the adaptive
-      // background — and, under a themed icon, the system's own plate — shows
-      // through.
-      final foreground = _load('assets/brand/icon_foreground.png');
-      expect(
-        foreground
-            .getPixel(
-              _onPage(1024, 0.52, spot.fx, spot.fy).x,
-              _onPage(1024, 0.52, spot.fx, spot.fy).y,
-            )
-            .a,
-        lessThan(16),
-        reason: 'the foreground bars must be transparent, not painted',
-      );
-
-      // On the flattened master they resolve to the backdrop, which is what
-      // makes the legacy icon legible: page and bar are the same 8.7:1 apart
-      // as page and backdrop.
-      _expectPixel(
-        _load('assets/brand/icon_master.png'),
-        _onPage(1024, 0.60, spot.fx, spot.fy),
-        _base,
-        reason: 'the master\'s bars must read as the backdrop showing through',
-      );
+    test('the corner is folded away on every layer', () {
+      // The fold is silhouette rather than content, so unlike the portrait and
+      // the lines it is cut out of the native splash frames as well — the
+      // Flutter splash opens on an already-folded page.
+      for (final source in _sources) {
+        final at = _onPage(
+          source.canvas,
+          source.page,
+          _foldCorner.fx,
+          _foldCorner.fy,
+        );
+        final pixel = _load(source.path).getPixel(at.x, at.y);
+        if (source.path.endsWith('icon_master.png')) {
+          _expectPixel(
+            _load(source.path),
+            at,
+            _base,
+            reason:
+                'the flattened master must show the backdrop through the fold',
+          );
+        } else {
+          expect(
+            pixel.a,
+            lessThan(16),
+            reason:
+                '${source.path} still has a square top-right corner — the '
+                'reference logo\'s folded corner is the mark\'s most '
+                'recognisable feature and the only one that survives at 36px',
+          );
+        }
+      }
     });
+
+    test(
+      'the portrait and the arrow are punched through to the layer behind',
+      () {
+        // On the adaptive foreground the contents are holes, so the adaptive
+        // background — and, under a themed icon, the system's own plate — shows
+        // through.
+        final foreground = _load('assets/brand/icon_foreground.png');
+        final master = _load('assets/brand/icon_master.png');
+
+        for (final spot in const [_portrait, _arrowShaft, _arrowHead]) {
+          final at = _onPage(1024, 0.52, spot.fx, spot.fy);
+          expect(
+            foreground.getPixel(at.x, at.y).a,
+            lessThan(16),
+            reason:
+                'the foreground contents must be transparent, not painted '
+                '(${spot.fx},${spot.fy})',
+          );
+
+          // On the flattened master they resolve to the backdrop, which is what
+          // makes the legacy icon legible: page and content are the same 8.7:1
+          // apart as page and backdrop.
+          _expectPixel(
+            master,
+            _onPage(1024, 0.60, spot.fx, spot.fy),
+            _base,
+            reason:
+                'the master\'s contents must read as the backdrop showing '
+                'through (${spot.fx},${spot.fy})',
+          );
+        }
+      },
+    );
 
     test(
       'the monochrome layer is a flat silhouette with its bars punched out',
@@ -288,12 +355,21 @@ void main() {
           expect(ink.r, greaterThan(250));
         }
 
-        final bar = _onPage(1024, 0.52, 0.40, 0.27);
-        expect(
-          mono.getPixel(bar.x, bar.y).a,
-          lessThan(16),
-          reason: 'the content bars are holes, so the theme shows through them',
-        );
+        for (final spot in const [
+          _portrait,
+          _arrowShaft,
+          _arrowHead,
+          _foldCorner,
+        ]) {
+          final at = _onPage(1024, 0.52, spot.fx, spot.fy);
+          expect(
+            mono.getPixel(at.x, at.y).a,
+            lessThan(16),
+            reason:
+                'the contents and the fold are holes, so the theme shows '
+                'through them (${spot.fx},${spot.fy})',
+          );
+        }
       },
     );
 
@@ -328,25 +404,26 @@ void main() {
   });
 
   group('native splash source images', () {
-    test('they are the mark with no content bars — the splash\'s frame 0', () {
-      // The animated splash opens on the blank page and writes the bars in. A
-      // finished mark here would mean the mark appears, vanishes for a beat,
-      // then animates back in at the native-to-Flutter handoff.
-      for (final source in const [
-        (path: 'assets/brand/splash_logo.png', canvas: 640, page: 0.90),
-        (path: 'assets/brand/splash_android12.png', canvas: 1152, page: 0.50),
-      ]) {
+    test('they are the empty folded page — the splash\'s frame 0', () {
+      // The animated splash opens on the empty page and places the portrait,
+      // writes the lines in and draws the arrow out. A finished mark here would
+      // mean the mark appears, loses its contents for a beat, then animates
+      // them back in at the native-to-Flutter handoff.
+      for (final source in _splashSources) {
         final image = _load(source.path);
         expect(image.width, source.canvas);
 
-        _expectPixel(
-          image,
-          _onPage(source.canvas, source.page, 0.40, 0.27),
-          _mark,
-          reason:
-              '${source.path} has its content bars punched out — the mark '
-              'would appear complete, then lose its bars at the handoff',
-        );
+        for (final spot in const [_portrait, _arrowShaft, _arrowHead]) {
+          _expectPixel(
+            image,
+            _onPage(source.canvas, source.page, spot.fx, spot.fy),
+            _mark,
+            reason:
+                '${source.path} already has its contents punched out at '
+                '(${spot.fx},${spot.fy}) — the mark would appear complete, '
+                'then lose them at the handoff',
+          );
+        }
       }
     });
 
@@ -354,10 +431,7 @@ void main() {
       // lib/screens/splash_screen.dart draws a 164dp page on a 390dp phone and
       // opens it at 0.88 scale = 144dp. Both sources are treated as 4x assets
       // by their platforms, so both must carry a 144dp page.
-      for (final source in const [
-        (path: 'assets/brand/splash_logo.png', canvas: 640, page: 0.90),
-        (path: 'assets/brand/splash_android12.png', canvas: 1152, page: 0.50),
-      ]) {
+      for (final source in _splashSources) {
         expect(
           source.canvas * source.page / 4,
           closeTo(144, 1),
@@ -393,7 +467,7 @@ void main() {
       }
     });
 
-    test('the generated Android icon carries the new palette', () {
+    test('the generated Android icon carries the current mark', () {
       // The end of the pipeline, not the start: this is the file the launcher
       // actually reads, so it catches a regenerate that was never run.
       final launcher = _load(
@@ -407,9 +481,24 @@ void main() {
       );
       _expectPixel(
         launcher,
-        _onPage(launcher.width, 0.60, 0.30, 0.40),
+        _onPage(launcher.width, 0.60, 0.30, 0.680),
         _mark,
         reason: 'the shipped mipmap still has the old mark fill',
+      );
+      // Two shapes that only exist in the current mark, so a stale mipmap left
+      // over from the previous drawing fails here rather than passing on the
+      // colour alone.
+      _expectPixel(
+        launcher,
+        _onPage(launcher.width, 0.60, _foldCorner.fx, _foldCorner.fy),
+        _base,
+        reason: 'the shipped mipmap has not been regenerated with the fold',
+      );
+      _expectPixel(
+        launcher,
+        _onPage(launcher.width, 0.60, _portrait.fx, _portrait.fy),
+        _base,
+        reason: 'the shipped mipmap has not been regenerated with the portrait',
       );
     });
 

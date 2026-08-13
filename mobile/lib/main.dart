@@ -42,7 +42,7 @@ Future<void> main() async {
     return true;
   };
 
-  runApp(const ResumeForgeApp());
+  runApp(const ResivoApp());
 }
 
 /// Opens local storage.
@@ -58,18 +58,18 @@ Future<ResumeRepository> openStorage() async {
   return HiveResumeRepository.open();
 }
 
-class ResumeForgeApp extends StatefulWidget {
-  const ResumeForgeApp({super.key, this.startup = openStorage});
+class ResivoApp extends StatefulWidget {
+  const ResivoApp({super.key, this.startup = openStorage});
 
   /// Injected so tests can drive a slow, a failing, and a recovering start
   /// without a real Hive box.
   final Future<ResumeRepository> Function() startup;
 
   @override
-  State<ResumeForgeApp> createState() => _ResumeForgeAppState();
+  State<ResivoApp> createState() => _ResivoAppState();
 }
 
-class _ResumeForgeAppState extends State<ResumeForgeApp> {
+class _ResivoAppState extends State<ResivoApp> {
   /// Built once rather than per rebuild: the theme is a pure function of
   /// nothing, and both slots below want the same instance.
   final ThemeData _theme = AppTheme.build();
@@ -155,7 +155,7 @@ class _ResumeForgeAppState extends State<ResumeForgeApp> {
         }),
       ],
       child: MaterialApp(
-        title: 'ResumeForge',
+        title: 'Resivo',
         debugShowCheckedModeBanner: false,
         theme: _theme,
         // The app is dark by design rather than following the system: the

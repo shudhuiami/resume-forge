@@ -13,6 +13,7 @@ import '../state/app_providers.dart';
 import '../state/editor_controller.dart';
 import '../templates/registry.dart';
 import '../theme/tokens.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/confirm_dialog.dart';
 import '../widgets/form_fields.dart';
 import '../widgets/pdf_page_view.dart';
@@ -78,8 +79,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _controller.saveNow();
-    // The undo offer cannot outlive the editor it undoes into.
-    _undoBar?.close();
+    // The undo offer cannot outlive the editor it undoes into. Dismissing an
+    // already-dismissed toast is a no-op, so no guard is needed here.
+    _undoBar?.dismiss();
     _tabs.dispose();
     _controller.dispose();
     super.dispose();
@@ -136,35 +138,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
 
   Future<void> _runExport(_ExportDestination destination) async {
     if (_exporting) return;
-    final messenger = ScaffoldMessenger.of(context);
     setState(() => _exporting = true);
 
-    // Held open for exactly as long as the work takes. A fixed one-second
-    // snackbar was wrong in both directions: it vanished mid-build on a slow
-    // render, leaving the app looking idle, and it lingered over the share
-    // sheet on a fast one.
-    final progress = messenger.showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                // A snackbar is the app's one inverted surface — light, on a
-                // dark app — so the spinner takes the inverted accent. The
-                // standard light violet primary all but disappears on it.
-                color: Theme.of(context).colorScheme.inversePrimary,
-              ),
-            ),
-            SizedBox(width: context.tokens.spaceMd),
-            const Expanded(child: Text('Preparing PDF…')),
-          ],
-        ),
-        duration: const Duration(minutes: 1),
-      ),
-    );
+    // Held open for exactly as long as the work takes. A fixed duration was
+    // wrong in both directions: it vanished mid-build on a slow render,
+    // leaving the app looking idle, and it lingered over the share sheet on a
+    // fast one. The progress variant never auto-dismisses for that reason.
+    final progress = AppToast.showProgress(context, message: 'Preparing PDF…');
 
     try {
       // Run alongside the export build rather than after it: the check costs
@@ -180,9 +160,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
       final bytes = results[0] as Uint8List;
       final truncation = results[1] as TruncationReport;
 
-      // Closed before the sheet opens, and unconditionally — this snackbar
+      // Closed before the sheet opens, and unconditionally — this toast
       // outlives the route, so an early back press must not strand it.
-      progress.close();
+      progress.dismiss();
       if (!mounted) return;
 
       // Templates drop content that does not fit rather than flowing to a
@@ -219,20 +199,18 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
         // location the platform hands back is a `content://` URI, which is
         // documented as unfit to show a user.
         case ExportStatus.saved:
-          messenger.showSnackBar(
-            SnackBar(content: Text('Saved as ${PdfExport.fileNameFor(info)}')),
+          AppToast.show(
+            context,
+            message: 'Saved as ${PdfExport.fileNameFor(info)}',
+            variant: ToastVariant.success,
           );
         case ExportStatus.failed:
-          _showExportFailure(messenger, outcome.message, destination);
+          _showExportFailure(outcome.message, destination);
       }
     } catch (_) {
-      progress.close();
+      progress.dismiss();
       if (!mounted) return;
-      _showExportFailure(
-        messenger,
-        'Could not prepare the PDF for export.',
-        destination,
-      );
+      _showExportFailure('Could not prepare the PDF for export.', destination);
     } finally {
       if (mounted) setState(() => _exporting = false);
     }
@@ -267,24 +245,16 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     return confirmed ?? false;
   }
 
-  void _showExportFailure(
-    ScaffoldMessengerState messenger,
-    String? message,
-    _ExportDestination destination,
-  ) {
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(message ?? 'Could not export the PDF.'),
-        // Long enough to read a two-line explanation and reach the action.
-        duration: const Duration(seconds: 8),
-        action: SnackBarAction(
-          label: 'Try again',
-          // Retries the destination the user already picked rather than
-          // reopening the chooser: they answered that question once, and a
-          // failed save is not a reason to ask it again.
-          onPressed: () => _runExport(destination),
-        ),
-      ),
+  void _showExportFailure(String? message, _ExportDestination destination) {
+    AppToast.show(
+      context,
+      message: message ?? 'Could not export the PDF.',
+      variant: ToastVariant.error,
+      actionLabel: 'Try again',
+      // Retries the destination the user already picked rather than
+      // reopening the chooser: they answered that question once, and a
+      // failed save is not a reason to ask it again.
+      onAction: () => _runExport(destination),
     );
   }
 
@@ -360,7 +330,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     if (_pickingPhoto) return;
     _pickingPhoto = true;
 
-    final messenger = ScaffoldMessenger.of(context);
     final service = ref.read(photoServiceProvider);
     try {
       final result = switch (source) {
@@ -382,7 +351,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           break;
         case PhotoPickStatus.denied:
         case PhotoPickStatus.failed:
-          _showPhotoProblem(messenger, result.message, source);
+          _showPhotoProblem(result.message, source);
       }
     } finally {
       _pickingPhoto = false;
@@ -395,35 +364,27 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
   /// device with no camera (nothing to fix, use the library) apart from a
   /// refused permission (fixable in Settings), and replacing it with one
   /// generic line here would throw that distinction away.
-  void _showPhotoProblem(
-    ScaffoldMessengerState messenger,
-    String? message,
-    _PhotoSource source,
-  ) {
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(message ?? 'Could not add the photo.'),
-        // Long enough to read a two-line explanation and reach the action.
-        duration: const Duration(seconds: 8),
-        // Every way the camera can fail — no hardware, a refused permission,
-        // no camera app — leaves exactly one way forward, and the message
-        // already names it. This is that sentence made tappable, so the user
-        // is not sent back to hunt for the button they just used. A library
-        // failure has no such second route, so it gets no action.
-        action: source == _PhotoSource.camera
-            ? SnackBarAction(
-                label: 'Choose photo',
-                onPressed: () => _pickPhotoFrom(_PhotoSource.gallery),
-              )
-            : null,
-      ),
+  void _showPhotoProblem(String? message, _PhotoSource source) {
+    AppToast.show(
+      context,
+      message: message ?? 'Could not add the photo.',
+      variant: ToastVariant.error,
+      // Every way the camera can fail — no hardware, a refused permission,
+      // no camera app — leaves exactly one way forward, and the message
+      // already names it. This is that sentence made tappable, so the user
+      // is not sent back to hunt for the button they just used. A library
+      // failure has no such second route, so it gets no action.
+      actionLabel: source == _PhotoSource.camera ? 'Choose photo' : null,
+      onAction: source == _PhotoSource.camera
+          ? () => _pickPhotoFrom(_PhotoSource.gallery)
+          : null,
     );
   }
 
   /// The live undo offer, if one is showing. Held so it can be closed when the
-  /// editor goes away — a snackbar outlives its route, and an Undo that no
-  /// longer has an editor to act on is a dead button.
-  ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _undoBar;
+  /// editor goes away — a toast lives in the overlay and outlives its route,
+  /// and an Undo that no longer has an editor to act on is a dead button.
+  ToastHandle? _undoBar;
 
   /// True when there is anything at all in this resume worth losing.
   ///
@@ -444,28 +405,19 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     final previous = _controller.state.data;
     _controller.updateData((_) => next);
 
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    final bar = messenger.showSnackBar(
-      SnackBar(
-        content: Text(message),
-        // Long enough to notice that everything changed and to act on it.
-        duration: const Duration(seconds: 8),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () {
-            if (!mounted) return;
-            _controller.updateData((_) => previous);
-          },
-        ),
-      ),
+    // Only one undo offer can be live: the previous one undoes into a
+    // document that no longer exists.
+    _undoBar?.dismiss();
+    _undoBar = AppToast.show(
+      context,
+      message: message,
+      // Long enough to notice that everything changed and to act on it.
+      actionLabel: 'Undo',
+      onAction: () {
+        if (!mounted) return;
+        _controller.updateData((_) => previous);
+      },
     );
-    _undoBar = bar;
-    // Dropped as soon as it goes away on its own: closing a snackbar that has
-    // already left the queue throws.
-    bar.closed.whenComplete(() {
-      if (identical(_undoBar, bar)) _undoBar = null;
-    });
   }
 
   /// Fills the resume with the example document.

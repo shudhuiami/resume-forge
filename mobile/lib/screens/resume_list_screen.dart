@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+
+import '../brand.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -24,14 +26,6 @@ const _maxContentWidth = 640.0;
 
 /// Widest a paragraph of body copy is allowed to run, in the same spirit.
 const _maxProseWidth = 380.0;
-
-/// Where the product name stops growing with the system text size.
-///
-/// It is one unbreakable word sharing a row with a fixed-size icon button, so
-/// past roughly this scale the only thing left for it to do on a 360px phone is
-/// ellipsize — and a product name cut to "ResumeForg…" is worse than a title
-/// that stops growing. Everything else on the screen scales without a ceiling.
-const _titleMaxTextScale = 1.6;
 
 /// The plate's fallback glyph: a fixed graphic, so it does not grow with text.
 const _plateGlyphSize = 22.0;
@@ -165,7 +159,7 @@ class ResumeListScreen extends ConsumerWidget {
     final leave = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Leave ResumeForge?'),
+        title: const Text('Leave $appName?'),
         content: const Text(
           'Your resumes are saved on this device and will be here when you '
           'come back.',
@@ -314,7 +308,7 @@ class _TopBar extends StatelessWidget {
           IconButton(
             onPressed: onAbout,
             icon: const Icon(Icons.info_outline),
-            tooltip: 'About ResumeForge',
+            tooltip: 'About $appName',
           ),
         ],
       ),
@@ -473,25 +467,30 @@ class _Greeting extends StatelessWidget {
 /// screen's own title row now, above every state, at one size: an eyebrow above
 /// a larger greeting was a hierarchy that put the smallest type at the top and
 /// the app's name in the least emphatic thing on the screen.
+///
+/// It is [BrandWordmark] rather than plain text, so the one place the app names
+/// itself in every state is also the place it carries the brand's accent —
+/// spelled and coloured identically to the heading on the about screen.
+///
+/// **The text-scale cap is gone.** It existed because "ResumeForge" is eleven
+/// characters and one unbreakable word, and past ~1.6x it had nothing left to
+/// do on a 360px phone beside a 48px icon button except ellipsize into
+/// "ResumeForg…". "Resivo" is six characters: it measures ~67px at 1x and
+/// ~200px at 3x, against the 288px this row leaves on the narrowest phone, so
+/// it now scales without a ceiling like everything else on the screen.
+/// `test/screens/resume_list_layout_test.dart` asserts the row's own outcome —
+/// that the name is never ellipsized and the button stays on screen — rather
+/// than asserting the mechanism that used to guarantee it.
 @visibleForTesting
 class Wordmark extends StatelessWidget {
   const Wordmark({super.key});
 
-  static const text = 'ResumeForge';
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Text(
-      text,
+    return BrandWordmark(
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      // Capped rather than unbounded: see [_titleMaxTextScale]. It still grows
-      // with the system text size, it just stops before the only move left is
-      // to cut the product's name in half.
-      textScaler: MediaQuery.textScalerOf(
-        context,
-      ).clamp(maxScaleFactor: _titleMaxTextScale),
       style: theme.textTheme.titleLarge?.copyWith(
         fontWeight: FontWeight.w700,
         // Large and tight, matching the app bar's own title treatment on every

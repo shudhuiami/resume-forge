@@ -15,10 +15,12 @@ flutter_launcher_icons:
   ios: true
 
   # Android adaptive icon. The foreground keeps the mark inside the guaranteed
-  # 66%-of-canvas safe circle, so no launcher mask can clip the page corners;
-  # the backdrop is the flat matte base, so there is nothing in it a mask could
-  # crop badly — verified under circle, squircle, rounded-square and full-square
-  # masks at 48px.
+  # 66%-of-canvas safe circle — its farthest ink measures 0.3019 of the layer
+  # against a 0.3300 safe radius — so no launcher mask can clip the page
+  # corners; the backdrop is the flat matte base, so there is nothing in it a
+  # mask could crop badly. The whole mark, down to the arrowhead, was checked
+  # legible at 48px under circle, squircle, rounded-square and full-square
+  # masks.
   adaptive_icon_background: "assets/brand/icon_background.png"
   adaptive_icon_foreground: "assets/brand/icon_foreground.png"
   # This package otherwise wraps the foreground and monochrome drawables in a

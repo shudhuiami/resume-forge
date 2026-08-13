@@ -535,6 +535,11 @@ abstract final class AppTheme {
         indicatorSize: TabBarIndicatorSize.tab,
         dividerColor: colorScheme.outlineVariant,
       ),
+      // Kept although the app no longer raises a `SnackBar` itself — every
+      // notification goes through `AppToast` now, which floats top-right and
+      // does not cover the page. This stays because a `SnackBar` can still
+      // arrive from framework code or a plugin, and an unthemed one would
+      // paint Material's default light bar on a matte black app.
       snackBarTheme: SnackBarThemeData(
         // The one inverted surface in the app, and the only place `inverse*`
         // is used: a dark snackbar on a dark app is a message nobody sees, so

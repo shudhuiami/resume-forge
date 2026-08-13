@@ -18,7 +18,7 @@ if (hasReleaseKeystore) {
 }
 
 android {
-    namespace = "com.resumeforge.resume_forge"
+    namespace = "com.codevioso.resivo"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -28,8 +28,14 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.resumeforge.resume_forge"
+        // The app's identity to Android and to Play. Changed from the
+        // scaffold's `com.resumeforge.resume_forge` when the product was named
+        // Resivo, which was only safe because nothing had shipped yet — after
+        // a release this string can never change without becoming a different
+        // app. The Dart package is still `resume_forge`; that is an internal
+        // import path, invisible to users, and renaming it would churn every
+        // file for no benefit.
+        applicationId = "com.codevioso.resivo"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:resume_forge/brand.dart';
 import 'package:resume_forge/data/resume_repository.dart';
 import 'package:resume_forge/screens/about_screen.dart';
 import 'package:resume_forge/screens/gallery_screen.dart';
@@ -28,7 +29,7 @@ Future<void> simulateSystemBack() {
 }
 
 void main() {
-  const leaveTitle = 'Leave ResumeForge?';
+  const leaveTitle = 'Leave $appName?';
   const leaveBody =
       'Your resumes are saved on this device and will be here when you '
       'come back.';
