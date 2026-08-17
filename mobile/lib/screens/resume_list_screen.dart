@@ -1,11 +1,10 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-
-import '../brand.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../brand.dart';
 import '../data/resume_repository.dart';
 import '../models/resume.dart';
 import '../state/app_providers.dart';
@@ -475,12 +474,13 @@ class _Greeting extends StatelessWidget {
 /// **The text-scale cap is gone.** It existed because "ResumeForge" is eleven
 /// characters and one unbreakable word, and past ~1.6x it had nothing left to
 /// do on a 360px phone beside a 48px icon button except ellipsize into
-/// "ResumeForg…". "Resivo" is six characters: it measures ~67px at 1x and
-/// ~200px at 3x, against the 288px this row leaves on the narrowest phone, so
-/// it now scales without a ceiling like everything else on the screen.
-/// `test/screens/resume_list_layout_test.dart` asserts the row's own outcome —
-/// that the name is never ellipsized and the button stays on screen — rather
-/// than asserting the mechanism that used to guarantee it.
+/// "ResumeForg…". The name has since changed twice, and at thirteen characters
+/// "Resume Studio" is long enough that a 360px row at double text size runs out
+/// of width again — so the mark shrinks to fit instead of losing its last
+/// letters. `test/screens/resume_list_layout_test.dart` asserts the row's own
+/// outcome — that the name is never ellipsized and the button stays on screen —
+/// rather than the mechanism that happens to guarantee it, which is why those
+/// tests survived both renames.
 @visibleForTesting
 class Wordmark extends StatelessWidget {
   const Wordmark({super.key});
@@ -488,14 +488,26 @@ class Wordmark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return BrandWordmark(
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: theme.textTheme.titleLarge?.copyWith(
-        fontWeight: FontWeight.w700,
-        // Large and tight, matching the app bar's own title treatment on every
-        // pushed screen.
-        letterSpacing: -0.3,
+    // Shrinks rather than clips. "Resume Studio" is thirteen characters where
+    // the previous name was six, and at double text size on a 360px phone it
+    // no longer fits the 288px this row leaves beside the icon button — it
+    // ellipsized to "Resume Stud…", which is the one thing a wordmark must
+    // never do. `scaleDown` only ever engages once the name would not fit, so
+    // at every ordinary text size the name still grows with the user's setting;
+    // past that point it holds at the width of the row instead of losing its
+    // last letters. The About screen's brand block does the same.
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: AlignmentDirectional.centerStart,
+      child: BrandWordmark(
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.titleLarge?.copyWith(
+          fontWeight: FontWeight.w700,
+          // Large and tight, matching the app bar's own title treatment on
+          // every pushed screen.
+          letterSpacing: -0.3,
+        ),
       ),
     );
   }

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:resume_forge/brand.dart';
 import 'package:resume_forge/screens/splash_screen.dart';
 import 'package:resume_forge/theme/app_theme.dart';
 
@@ -60,7 +61,7 @@ Future<void> _resize(WidgetTester tester, Size size) async {
 }
 
 double _markProgress(WidgetTester tester) =>
-    tester.widget<ResivoMark>(find.byType(ResivoMark)).progress;
+    tester.widget<ResumeStudioMark>(find.byType(ResumeStudioMark)).progress;
 
 /// The mark, rasterised, so what it *paints* can be asserted rather than what
 /// it was handed.
@@ -108,7 +109,7 @@ class _MarkPixels {
 Future<_MarkPixels> _rasterise(WidgetTester tester) async {
   final boundary = tester.renderObject<RenderRepaintBoundary>(
     find.descendant(
-      of: find.byType(ResivoMark),
+      of: find.byType(ResumeStudioMark),
       matching: find.byType(RepaintBoundary),
     ),
   );
@@ -129,9 +130,9 @@ void main() {
       await tester.pumpWidget(_harness(const SplashScreen()));
       await tester.pump();
 
-      expect(find.byType(ResivoMark), findsOneWidget);
-      expect(find.byKey(resivoMarkKey), findsOneWidget);
-      expect(find.text('Resivo'), findsOneWidget);
+      expect(find.byType(ResumeStudioMark), findsOneWidget);
+      expect(find.byKey(resumeStudioMarkKey), findsOneWidget);
+      expect(find.text(appName), findsOneWidget);
       expect(find.text('Everything stays on this device'), findsOneWidget);
     });
 
@@ -329,7 +330,7 @@ void main() {
       await tester.pumpWidget(_harness(const SizedBox.shrink()));
       await tester.pump();
 
-      expect(find.byType(ResivoMark), findsNothing);
+      expect(find.byType(ResumeStudioMark), findsNothing);
       expect(
         SchedulerBinding.instance.transientCallbackCount,
         0,
@@ -351,9 +352,9 @@ void main() {
           await tester.pumpAndSettle();
 
           expect(tester.takeException(), isNull);
-          expect(find.text('Resivo'), findsOneWidget);
+          expect(find.text(appName), findsOneWidget);
 
-          final mark = tester.getSize(find.byKey(resivoMarkKey));
+          final mark = tester.getSize(find.byKey(resumeStudioMarkKey));
           expect(mark.height, greaterThan(0));
           expect(
             mark.width,
@@ -372,8 +373,8 @@ void main() {
         await tester.pumpWidget(_harness(const SplashScreen()));
         await tester.pumpAndSettle();
 
-        final box = tester.getSize(find.byKey(resivoMarkKey));
-        final expected = ResivoMark.boxSizeFor(box.height / 1.30);
+        final box = tester.getSize(find.byKey(resumeStudioMarkKey));
+        final expected = ResumeStudioMark.boxSizeFor(box.height / 1.30);
         expect(box.width, closeTo(expected.width, 0.5));
       }
     });

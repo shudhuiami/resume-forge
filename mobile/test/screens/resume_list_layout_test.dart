@@ -707,7 +707,7 @@ void main() {
     /// This used to assert the *mechanism* — that the title clamped its own
     /// text scaler at 1.6x — because "ResumeForge" is eleven characters and
     /// could do nothing past that but ellipsize into "ResumeForg…". The clamp
-    /// is gone with the rename: "Resivo" is six characters and fits this row
+    /// is gone: the row now shrinks the mark to fit rather than capping the
     /// unscaled well past 3x, so what is asserted now is the outcome the clamp
     /// existed to buy. If the name ever grows again, this fails first.
     testWidgets('the title shares its row at 2x text on a small phone', (
@@ -750,7 +750,7 @@ void main() {
     ///
     /// **This is a harder case than a device.** `flutter_test` draws every
     /// glyph in its own fallback face, where each one is a full em square —
-    /// roughly twice Inter's advance for lowercase — so "Resivo" measures about
+    /// roughly twice Inter's advance for lowercase — so the name measures about
     /// 264 of the 288px available at 2x here, against about 133px with the
     /// typeface that actually ships. Clearing 2x under the test font is
     /// therefore closer to clearing 4x on a phone, which is well past the ~3.1x

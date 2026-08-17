@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_ce_flutter/hive_flutter.dart';
 
+import 'brand.dart';
 import 'data/resume_repository.dart';
 import 'screens/resume_list_screen.dart';
 import 'screens/splash_screen.dart';
@@ -42,7 +43,7 @@ Future<void> main() async {
     return true;
   };
 
-  runApp(const ResivoApp());
+  runApp(const ResumeStudioApp());
 }
 
 /// Opens local storage.
@@ -58,18 +59,18 @@ Future<ResumeRepository> openStorage() async {
   return HiveResumeRepository.open();
 }
 
-class ResivoApp extends StatefulWidget {
-  const ResivoApp({super.key, this.startup = openStorage});
+class ResumeStudioApp extends StatefulWidget {
+  const ResumeStudioApp({super.key, this.startup = openStorage});
 
   /// Injected so tests can drive a slow, a failing, and a recovering start
   /// without a real Hive box.
   final Future<ResumeRepository> Function() startup;
 
   @override
-  State<ResivoApp> createState() => _ResivoAppState();
+  State<ResumeStudioApp> createState() => _ResumeStudioAppState();
 }
 
-class _ResivoAppState extends State<ResivoApp> {
+class _ResumeStudioAppState extends State<ResumeStudioApp> {
   /// Built once rather than per rebuild: the theme is a pure function of
   /// nothing, and both slots below want the same instance.
   final ThemeData _theme = AppTheme.build();
@@ -155,7 +156,7 @@ class _ResivoAppState extends State<ResivoApp> {
         }),
       ],
       child: MaterialApp(
-        title: 'Resivo',
+        title: appName,
         debugShowCheckedModeBanner: false,
         theme: _theme,
         // The app is dark by design rather than following the system: the

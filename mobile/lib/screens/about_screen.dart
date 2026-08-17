@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 
 import '../brand.dart';
 
+import '../legal.dart';
 import '../theme/tokens.dart';
 import '../widgets/form_fields.dart';
+import 'legal_screen.dart';
 
 /// Widest the column is allowed to grow, matching the resume list: a paragraph
 /// run across a full tablet is a reading problem, not a use of the space.
@@ -28,10 +30,6 @@ const _maxProseWidth = 380.0;
 /// reads the pubspec off disk and fails if the two disagree. **Change the
 /// pubspec and this together.**
 const appVersion = '1.0.0';
-
-/// Exactly how the developer is credited. One spelling, in one place, lowercase
-/// as given.
-const developerName = 'codevioso';
 
 /// The developer's own logo, bundled under `assets/vendor/`.
 ///
@@ -121,6 +119,7 @@ class AboutScreen extends StatelessWidget {
                 const _BrandBlock(),
                 SizedBox(height: tokens.spaceXl),
                 const _PrivacyCard(),
+                const _LegalLinks(),
                 const _CreditCard(),
                 const _VersionFooter(),
               ],
@@ -134,7 +133,7 @@ class AboutScreen extends StatelessWidget {
 
 /// The product name, with the one letter the brand colours.
 ///
-/// The Resivo logo is a serif wordmark whose only colour is a gold dot on the
+/// The logo is a serif wordmark whose only colour is a gold dot on the
 /// "i". The app cannot reproduce the logo's typeface — the UI is set in Inter,
 /// and a second chrome typeface bundled to print six letters would be a bigger
 /// change than the cue is worth — so what is carried inside the app is the
@@ -193,7 +192,7 @@ class _BrandBlock extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Shrinks rather than clips. "Resivo" is one unbreakable word with no
+        // Shrinks rather than clips. "Resume Studio" breaks at the space, so this
         // wrap opportunity in it, so at an extreme accessibility text size the
         // only alternatives are cutting the product's name in half or running
         // it off the edge of the screen. It fits unscaled well past 3x on the
@@ -418,6 +417,54 @@ class _VersionFooter extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The two documents Google Play requires and a user is entitled to read.
+///
+/// Rows rather than a card of prose: these are destinations, and a destination
+/// that looks like a paragraph does not get tapped. They sit directly under the
+/// privacy card because that card makes a claim, and these are where the claim
+/// is written down in full.
+class _LegalLinks extends StatelessWidget {
+  const _LegalLinks();
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return Padding(
+      padding: EdgeInsets.only(top: tokens.spaceLg),
+      child: Column(
+        children: [
+          _LegalLink(document: privacyPolicy, icon: Icons.lock_outline),
+          Divider(height: tokens.spaceXs),
+          _LegalLink(document: termsOfUse, icon: Icons.description_outlined),
+        ],
+      ),
+    );
+  }
+}
+
+class _LegalLink extends StatelessWidget {
+  const _LegalLink({required this.document, required this.icon});
+
+  final LegalDocument document;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListTile(
+      leading: Icon(icon, color: theme.colorScheme.onSurfaceVariant),
+      title: Text(document.title),
+      trailing: Icon(
+        Icons.chevron_right,
+        color: theme.colorScheme.onSurfaceVariant,
+      ),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => LegalScreen(document: document)),
+      ),
     );
   }
 }

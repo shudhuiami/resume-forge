@@ -18,7 +18,7 @@ if (hasReleaseKeystore) {
 }
 
 android {
-    namespace = "com.codevioso.resivo"
+    namespace = "com.codevioso.resumestudio"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -35,7 +35,7 @@ android {
         // app. The Dart package is still `resume_forge`; that is an internal
         // import path, invisible to users, and renaming it would churn every
         // file for no benefit.
-        applicationId = "com.codevioso.resivo"
+        applicationId = "com.codevioso.resumestudio"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

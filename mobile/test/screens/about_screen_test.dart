@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:resume_forge/brand.dart';
+import 'package:resume_forge/legal.dart';
 import 'package:resume_forge/screens/about_screen.dart';
+import 'package:resume_forge/screens/legal_screen.dart';
 import 'package:resume_forge/theme/app_theme.dart';
 import 'package:resume_forge/theme/tokens.dart';
 
@@ -86,7 +88,7 @@ void main() {
       expect(text.semanticsLabel, appName);
     });
 
-    /// The Resivo logo's only colour is the gold dot on its "i", and the app's
+    /// The logo's only colour is the gold dot on its "i", and the app's
     /// amber is that gold. It comes from the scheme rather than from a literal.
     testWidgets('one letter carries the brand accent, from the theme', (
       tester,
@@ -199,14 +201,20 @@ void main() {
       );
     });
 
-    /// Nothing on this screen may be a control that goes nowhere. No URL,
-    /// address or entity was supplied for the developer, so the credit is a
-    /// mark rather than a link — a tappable-looking dead end would be worse
-    /// than the plain image.
-    testWidgets('has no dead links or stub controls', (tester) async {
+    /// Nothing on this screen may be a control that goes nowhere. The two
+    /// legal links are controls, so they are held to the stronger standard —
+    /// each is tapped and must actually arrive somewhere. No URL, address or
+    /// entity was supplied for the developer, so the credit stays a mark
+    /// rather than a link: a tappable-looking dead end would be worse than the
+    /// plain image.
+    testWidgets('every control goes somewhere', (tester) async {
       await pumpAbout(tester, const Size(390, 844));
 
-      // The back button is the only interactive thing here.
+      // Interactive things are the back button and the two legal links, and
+      // nothing else — in particular not the developer logo.
+      final links = find.byType(ListTile);
+      expect(links, findsNWidgets(2));
+
       final buttons = find.byWidgetPredicate(
         (w) =>
             w is ButtonStyleButton ||
@@ -214,16 +222,45 @@ void main() {
             (w is GestureDetector && w.onTap != null),
       );
       for (final element in buttons.evaluate()) {
+        final widget = element.widget;
+        final inAppBar = find
+            .descendant(
+              of: find.byType(AppBar),
+              matching: find.byWidget(widget),
+            )
+            .evaluate()
+            .isNotEmpty;
+        final inLink = find
+            .descendant(of: links, matching: find.byWidget(widget))
+            .evaluate()
+            .isNotEmpty;
         expect(
-          find.descendant(
-            of: find.byType(AppBar),
-            matching: find.byWidget(element.widget),
-          ),
-          findsOneWidget,
-          reason: '${element.widget} is a control outside the app bar',
+          inAppBar || inLink,
+          isTrue,
+          reason:
+              '$widget is a control that is neither the back button nor a '
+              'legal link',
         );
       }
     });
+
+    // One test per document rather than a loop inside one: pumping the same
+    // widget tree twice *updates* it instead of rebuilding, so the Navigator
+    // would still be showing the first document when the second tap ran.
+    for (final document in [privacyPolicy, termsOfUse]) {
+      testWidgets('the ${document.title} link opens it', (tester) async {
+        // Tall viewport on purpose: the links sit below the privacy card, and
+        // a ListView does not mount what it has not reached. This test is
+        // about where the link *goes*; placement is covered by the viewport
+        // suite below.
+        await pumpAbout(tester, const Size(390, 1600));
+        await tester.tap(find.text(document.title));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(LegalScreen), findsOneWidget);
+        expect(find.text(document.summary), findsOneWidget);
+      });
+    }
 
     testWidgets('states the version', (tester) async {
       await pumpAbout(tester, const Size(390, 844));

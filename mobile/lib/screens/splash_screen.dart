@@ -104,7 +104,7 @@ const _arrowHeadWidth = 0.250;
 /// The mark's box relative to the page: room around it for the mat.
 ///
 /// Deliberately unchanged from when a blurred glow lived in that room and
-/// needed all of it. The box is what [ResivoMark.heightFor] divides the viewport
+/// needed all of it. The box is what [ResumeStudioMark.heightFor] divides the viewport
 /// by, so shrinking it to fit the smaller mat would grow the page on screen —
 /// and the page's on-screen size is measured into `assets/brand`, which is the
 /// one number the native handoff cannot afford to move. The mat gets a roomy
@@ -149,9 +149,9 @@ const _maxProseWidth = 380.0;
 
 /// Addresses the mark from a test.
 @visibleForTesting
-const resivoMarkKey = Key('resivo-mark');
+const resumeStudioMarkKey = Key('resivo-mark');
 
-/// The Resivo mark: an A4 page in one solid accent colour with its top-right
+/// The Resume Studio mark: an A4 page in one solid accent colour with its top-right
 /// corner folded away, its portrait, content lines and rising arrow punched
 /// back to the surface colour, lying on a flat mat.
 ///
@@ -171,8 +171,12 @@ const resivoMarkKey = Key('resivo-mark');
 /// the two content lines and the arrow. At 0 it is the empty folded page the
 /// native splash shows; at 1 it is the finished mark, which is also what
 /// reduced-motion renders on the very first frame.
-class ResivoMark extends StatelessWidget {
-  const ResivoMark({super.key, required this.height, this.progress = 1.0});
+class ResumeStudioMark extends StatelessWidget {
+  const ResumeStudioMark({
+    super.key,
+    required this.height,
+    this.progress = 1.0,
+  });
 
   /// Height of the page itself. The widget is larger than this — see
   /// [boxSizeFor] — because the glow needs somewhere to fall.
@@ -208,7 +212,7 @@ class ResivoMark extends StatelessWidget {
     return ExcludeSemantics(
       child: RepaintBoundary(
         child: SizedBox(
-          key: resivoMarkKey,
+          key: resumeStudioMarkKey,
           width: size.width,
           height: size.height,
           child: CustomPaint(
@@ -521,7 +525,7 @@ class _SplashScreenState extends State<SplashScreen>
         body: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final height = ResivoMark.heightFor(
+              final height = ResumeStudioMark.heightFor(
                 constraints,
                 MediaQuery.textScalerOf(context),
               );
@@ -581,7 +585,7 @@ class _Content extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        ResivoMark(height: markHeight, progress: progress),
+        ResumeStudioMark(height: markHeight, progress: progress),
         SizedBox(height: tokens.spaceLg),
         Opacity(
           opacity: wordmark,
@@ -591,7 +595,7 @@ class _Content extends StatelessWidget {
             // A wordmark is a graphic, not a paragraph, so it is never allowed
             // to wrap. "ResumeForge" needed this at the sizes this app is
             // reviewed at: at 2x text on a 360dp phone it broke to
-            // "ResumeForg / e". "Resivo" is five characters shorter, and on
+            // "ResumeForg / e". The name has changed since, and on
             // that same phone — 312dp of room once the 24dp inset is taken off
             // both sides — it measures 141.6dp at 1x and 285.6dp at 2x, so the
             // clamp is idle at both. It starts engaging around 2.2x (357.6dp at
@@ -699,7 +703,7 @@ class StartupFailureScreen extends StatelessWidget {
                           ),
                           SizedBox(height: tokens.spaceSm),
                           Text(
-                            'Resivo keeps everything on this device, and its '
+                            '$appName keeps everything on this device, and its '
                             'local storage did not open. Nothing has been '
                             'lost — it just cannot be read yet.',
                             textAlign: TextAlign.center,

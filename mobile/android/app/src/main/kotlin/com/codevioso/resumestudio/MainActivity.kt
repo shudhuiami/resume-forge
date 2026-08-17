@@ -1,4 +1,4 @@
-package com.codevioso.resivo
+package com.codevioso.resumestudio
 
 import io.flutter.embedding.android.FlutterActivity
 
