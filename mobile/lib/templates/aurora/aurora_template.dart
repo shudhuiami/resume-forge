@@ -53,6 +53,13 @@ class AuroraTemplate extends ResumeTemplate {
   static const _photoSize = 92.0;
   static const _pagePadding = 32.0;
 
+  /// Field mark size and the gap to its value. 7.6pt beside 8.6pt type is the
+  /// mark reading as a peer of the x-height rather than as a bullet; measured
+  /// against the rail, the 13pt the pair costs changes no line count, for the
+  /// shipped sample or for a pathological profile URL.
+  static const _markSize = 7.6;
+  static const _markGap = 5.4;
+
   /// Sidebar density. This was the one skills call site in the catalog with no
   /// cap, and an uncapped list is not a generous design — it is a list that
   /// takes the whole rail: at 24 skills the meters ran to the foot of the page
@@ -203,15 +210,20 @@ class AuroraTemplate extends ResumeTemplate {
     final p = ctx.palette;
     final info = data.personalInfo;
 
-    final contact = <String>[
-      info.email,
-      info.phone,
-      info.location,
-    ].where((e) => e.trim().isNotEmpty).toList();
-    final links = <String>[
-      info.linkedin,
-      info.website,
-    ].where((e) => e.trim().isNotEmpty).toList();
+    // QA-8. Aurora is the one design in the catalog that takes field marks —
+    // see THE FIELD MARK RULE in template.dart for why the other twelve do
+    // not. Its contact list is stacked and carries no field labels, and the
+    // rail already speaks in geometry (the rule before every section title,
+    // the pill chips, the meters), so a mark has somewhere to belong here.
+    // Nothing is removed to make room: the value is still drawn in full, so a
+    // parser reading the extracted text sees exactly what it saw before.
+    final contact = <(FieldMark, String, bool)>[
+      (FieldMark.email, info.email, false),
+      (FieldMark.phone, info.phone, false),
+      (FieldMark.location, info.location, false),
+      (FieldMark.profile, info.linkedin, true),
+      (FieldMark.website, info.website, true),
+    ].where((e) => e.$2.trim().isNotEmpty).toList();
 
     final contactStyle = pw.TextStyle(
       font: sans.regular,
@@ -223,22 +235,11 @@ class AuroraTemplate extends ResumeTemplate {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        if (contact.isNotEmpty || links.isNotEmpty) ...[
+        if (contact.isNotEmpty) ...[
           _sectionTitle('Contact', sans, p),
           ...contact.map(
-            (line) => pw.Padding(
-              padding: const pw.EdgeInsets.only(bottom: 4),
-              child: clampedText(line, maxLines: 2, style: contactStyle),
-            ),
-          ),
-          // Links get the URL rule's multi-line form: the sidebar is ~174pt
-          // wide, so a real LinkedIn URL needs two lines and must break at a
-          // path separator rather than mid-handle.
-          ...links.map(
-            (line) => pw.Padding(
-              padding: const pw.EdgeInsets.only(bottom: 4),
-              child: urlText(line, maxLines: 3, style: contactStyle),
-            ),
+            (e) =>
+                _contactRow(e.$1, e.$2, isUrl: e.$3, style: contactStyle, p: p),
           ),
           pw.SizedBox(height: 14),
         ],
@@ -332,6 +333,42 @@ class AuroraTemplate extends ResumeTemplate {
           ...data.projects.map((pr) => _projectEntry(pr, sans, p)),
         ],
       ],
+    );
+  }
+
+  /// One contact line: its field mark, then the value.
+  ///
+  /// The value sits in an `Expanded` so a long URL is bounded by the rail
+  /// rather than laid out unbounded beside a non-flex mark — URL rule item 5.
+  /// Links keep the multi-line form: the text column is ~161pt after the mark,
+  /// so a real LinkedIn URL needs two lines and must break at a path separator
+  /// rather than mid-handle.
+  pw.Widget _contactRow(
+    FieldMark mark,
+    String value, {
+    required bool isUrl,
+    required pw.TextStyle style,
+    required TemplatePalette p,
+  }) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 4),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          // Nudged down so the mark centres on the first line's x-height
+          // instead of hanging off its ascender.
+          pw.Padding(
+            padding: const pw.EdgeInsets.only(top: 1.6),
+            child: fieldMark(mark, size: _markSize, color: p.primary),
+          ),
+          pw.SizedBox(width: _markGap),
+          pw.Expanded(
+            child: isUrl
+                ? urlText(value, maxLines: 3, style: style)
+                : clampedText(value, maxLines: 2, style: style),
+          ),
+        ],
+      ),
     );
   }
 

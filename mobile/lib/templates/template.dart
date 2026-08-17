@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -197,6 +198,26 @@ pw.BorderRadius pillRadius(double height) =>
 //    always the website, and leaves a dangling separator where it was. Contact
 //    values are laid out as atomic runs by [contactStrip] instead.
 //
+// 7. THE DRAWN TEXT IS TAPPABLE, AND THE TARGET IS THE URL THE USER TYPED —
+//    not the shortened thing on the page. Recruiters read resumes on screen, so
+//    every URL this catalog draws also carries a `/Link` annotation (QA-12).
+//    Items 1, 3 and 4 exist precisely because the displayed form is *lossy*:
+//    `github.com/…/atlas` is a fine thing to read and a link to nowhere. So the
+//    two are computed separately — [urlDisplay] for the glyphs, [urlTarget] for
+//    the destination — and only [urlDisplay] may drop characters.
+//
+//    Nothing about the display or the layout changes: dart_pdf writes
+//    `/Border [0 0 0]`, the annotation is a rectangle over glyphs already drawn,
+//    and it is created at *paint* time, so a link a `pw.Column` evicted leaves
+//    no annotation behind (see the ENGINE HAZARD note).
+//
+//    [urlTarget] answers the one hard question — what to do with a scheme-less
+//    string, since a resume field is free text and `https://` in front of
+//    "portfolio available on request" is a link to nonsense. Its rule is in its
+//    own doc comment. When it returns null the text is still drawn, just not
+//    linked: a URL this app cannot make an address out of is better as plain
+//    ink than as a promise it cannot keep.
+//
 // The rule is deliberately shared while the *typography* is not: each design
 // keeps its own font, size, and colour for a link. Three helpers implement it,
 // and between them they cover every place a URL appears in the catalog:
@@ -227,6 +248,89 @@ String urlDisplay(String raw) {
   return s;
 }
 
+/// An `http`/`https` scheme at the head of a string, captured for lower-casing.
+final _urlScheme = RegExp(r'^([a-zA-Z][a-zA-Z0-9+.\-]*)://');
+
+/// A plausible hostname at the head of a string, ending at the authority.
+///
+/// Deliberately strict about the last label: `{2,}` *letters* is what separates
+/// `alex.dev` from `Ph.D` and `192.168.1.1`. See [urlTarget].
+final _urlHost = RegExp(
+  r'^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(?:[:/?#]|$)',
+);
+
+final _anyWhitespace = RegExp(r'\s');
+
+/// ASCII characters RFC 3986 excludes from a URI, which must be escaped.
+const _uriExcluded = {'"', '<', '>', '\\', '^', '`', '{', '|', '}'};
+
+/// The absolute URL a drawn link should navigate to, or null when there is no
+/// honest one to make. See the URL rule, item 7.
+///
+/// The interesting case is the one a free-text field guarantees: a string with
+/// no scheme. `alex.dev` plainly wants to be `https://alex.dev`, and prefixing
+/// it is the difference between a working link and a dead one on most resumes,
+/// because almost nobody types the scheme. But the same field also holds
+/// `n/a`, `LinkedIn: on request`, and an empty placeholder somebody typed a
+/// space into, and `https://n/a` is a link to nonsense — worse than no link,
+/// because a reader cannot tell it is broken until they follow it.
+///
+/// So the scheme is inferred **only when what precedes the first `/ : ? #`
+/// already looks like a hostname**: dot-separated labels ending in two or more
+/// letters. That accepts every real address a resume carries and rejects prose,
+/// because prose does not have a TLD. Three further rules keep it honest:
+///
+/// - Any whitespace anywhere disqualifies the string. A URL has none, and a
+///   sentence that happens to contain a domain is still a sentence.
+/// - Only `http` and `https` are linked. A PDF viewer will happily follow
+///   whatever scheme an annotation names, and a resume has no business carrying
+///   a `javascript:` or `data:` one.
+/// - A scheme the user *did* type is kept, never upgraded — `http://` may be
+///   the only thing their host answers on — but it is lower-cased, so
+///   `HTTPS://x.dev`, `https://x.dev` and `x.dev` all resolve to one target.
+///
+/// The result is percent-escaped to printable ASCII. `%` itself is left alone,
+/// so a URL the user already escaped is not escaped twice.
+///
+/// Pure and total: safe on empty, blank, or malformed input.
+String? urlTarget(String raw) {
+  final s = raw.trim();
+  if (s.isEmpty || _anyWhitespace.hasMatch(s)) return null;
+
+  final match = _urlScheme.firstMatch(s);
+  final scheme = match == null ? 'https' : match.group(1)!.toLowerCase();
+  if (scheme != 'http' && scheme != 'https') return null;
+
+  // The authority onwards. Checked in both branches, so `https://` alone and a
+  // bare `https://n/a` are rejected on the same ground a scheme-less one is.
+  final rest = match == null ? s : s.substring(match.end);
+  if (!_urlHost.hasMatch(rest)) return null;
+
+  return '$scheme://${_asciiUri(rest)}';
+}
+
+/// Percent-escapes everything a URI may not carry literally.
+String _asciiUri(String s) {
+  final needsEscape = s.runes.any(
+    (r) =>
+        r <= 0x20 || r >= 0x7F || _uriExcluded.contains(String.fromCharCode(r)),
+  );
+  if (!needsEscape) return s;
+
+  final out = StringBuffer();
+  for (final rune in s.runes) {
+    final char = String.fromCharCode(rune);
+    if (rune > 0x20 && rune < 0x7F && !_uriExcluded.contains(char)) {
+      out.write(char);
+      continue;
+    }
+    for (final byte in utf8.encode(char)) {
+      out.write('%${byte.toRadixString(16).toUpperCase().padLeft(2, '0')}');
+    }
+  }
+  return out.toString();
+}
+
 /// Draws a URL under the URL rule above.
 ///
 /// Returns an empty box for empty input, so callers can hand it a field the
@@ -245,6 +349,7 @@ pw.Widget urlText(
 }) {
   final display = urlDisplay(raw);
   if (display.isEmpty) return pw.SizedBox();
+  final target = urlTarget(raw);
 
   final text = pw.LayoutBuilder(
     builder: (context, constraints) {
@@ -253,7 +358,7 @@ pw.Widget urlText(
         limit = math.min(limit, constraints.maxWidth);
       }
 
-      return pw.Text(
+      final drawn = pw.Text(
         _fitUrl(display, style, context, limit, maxLines),
         style: style,
         // The break decision has already been made and baked into the string;
@@ -264,6 +369,15 @@ pw.Widget urlText(
         overflow: pw.TextOverflow.clip,
         textAlign: align,
       );
+      if (target == null) return drawn;
+
+      // Item 7. Wrapped here rather than around the LayoutBuilder so the
+      // annotation rectangle is the text's own shrink-wrapped box: a `pw.Text`
+      // sizes itself to its widest line, so the hot area covers the glyphs and
+      // not the empty column beside them. `pw.UrlLink` is layout-transparent —
+      // it passes its constraints straight through and adopts the child's box —
+      // so nothing about the drawn page moves.
+      return pw.UrlLink(destination: target, child: drawn);
     },
   );
 
@@ -907,6 +1021,152 @@ String _elideText(String s, double limit, double Function(String) width) {
   );
   if (fits < 1) return '…';
   return '${s.substring(0, fits).trimRight()}…';
+}
+
+// ---------------------------------------------------------------------------
+// THE FIELD MARK RULE
+//
+// QA-8 asked for "an appropriate icon for each field in all templates". The
+// answer is one design, not thirteen, and the reasoning is worth keeping
+// because the request will come back.
+//
+// 1. THERE IS NO ICON FONT AND THERE MUST NOT BE ONE. `tool/build_fonts.py`
+//    subsets Inter, Lora and JetBrains Mono to
+//    `U+0020-00FF,U+0100-017F,U+2000-206F,U+20A0-20BF,U+2122,U+2192` — Latin,
+//    punctuation, currency. There is no envelope, no handset, no pin, no globe
+//    in any bundled face, and shipping a fourth font to draw five 8pt glyphs
+//    would cost more bytes than the entire template catalog. So a mark here is
+//    a stroked vector path, drawn straight onto the page canvas: no asset, no
+//    parsing, nothing to load, and it takes the design's own colour.
+//
+// 2. MOST DESIGNS DO NOT GET ONE, AND THAT IS THE POINT. Quill, Ledger, Linen,
+//    Orchid and Terminal are deliberately typographic — three say so in their
+//    own doc comments — and a pictogram would contradict the design rather than
+//    decorate it. Meridian and Compass already name every contact field in
+//    words ("EMAIL", "LINKEDIN"); an icon there would either duplicate the
+//    label or replace machine-readable text with vector art, and a resume is
+//    read by parsers as well as people. Beacon, Coral, Ember and Prism set
+//    contact as one flowing [contactStrip] run, where a mark reads as noise
+//    between separators rather than as a left-hand column.
+//
+//    What is left is a stacked, *unlabelled* contact list in a design that
+//    already draws non-typographic geometry. In this catalog that is Aurora.
+//    Circuit is stacked and unlabelled too and is deliberately excluded: its
+//    vocabulary is the monospace rule and the solid square, and a rounded
+//    envelope beside JetBrains Mono reads as an icon set bolted onto a
+//    schematic.
+//
+//    **Adding a mark to a design is a design decision, not a consistency
+//    fix.** If a future pass is tempted to apply these everywhere, that is the
+//    gallery's differentiation being spent, not a gap being closed.
+//
+// 3. THE MARK IS NEVER THE ONLY THING THAT SAYS WHAT A FIELD IS. Every contact
+//    value in this app is self-identifying — an address has an `@`, a phone has
+//    digits, a profile URL has its host in it — so the mark speeds a scan and
+//    carries nothing on its own. Nothing may ever be removed from the page
+//    because a mark is standing in for it: extracted text has to survive.
+//
+// 4. WEIGHT SCALES WITH SIZE. Stroke width is given in grid units and scaled
+//    with the icon, so a mark set beside 8.6pt type has the same optical weight
+//    as one beside 12pt type. A fixed point width would look like a hairline at
+//    one size and a slab at the other.
+// ---------------------------------------------------------------------------
+
+/// The contact fields a design may set a mark beside. See the field mark rule.
+enum FieldMark { email, phone, location, profile, website }
+
+/// A stroked mark for one contact field, [size] points square.
+///
+/// Drawn on a 24-unit grid with y up, which is the page's own axis, so no
+/// transform is needed and the paths read the way they are drawn. [weight] is
+/// in grid units — see the rule's item 4.
+///
+/// Deliberately hand-drawn rather than lifted from an icon set: at 7-9pt the
+/// shapes have to be simplified past what any 24px icon library assumes, and
+/// borrowing paths would attach a third-party licence to a PDF this app
+/// generates on the user's behalf.
+pw.Widget fieldMark(
+  FieldMark mark, {
+  required double size,
+  required PdfColor color,
+  double weight = 1.9,
+}) {
+  return pw.CustomPaint(
+    size: PdfPoint(size, size),
+    painter: (canvas, box) {
+      final u = size / 24;
+      void move(double x, double y) => canvas.moveTo(x * u, y * u);
+      void line(double x, double y) => canvas.lineTo(x * u, y * u);
+      void curve(
+        double x1,
+        double y1,
+        double x2,
+        double y2,
+        double x3,
+        double y3,
+      ) => canvas.curveTo(x1 * u, y1 * u, x2 * u, y2 * u, x3 * u, y3 * u);
+      void circle(double x, double y, double r) =>
+          canvas.drawEllipse(x * u, y * u, r * u, r * u);
+
+      canvas
+        ..setStrokeColor(color)
+        ..setLineWidth(weight * u)
+        ..setLineCap(PdfLineCap.round)
+        ..setLineJoin(PdfLineJoin.round);
+
+      switch (mark) {
+        case FieldMark.email:
+          // Envelope: body, then the flap folded to the centre.
+          move(2.5, 5);
+          line(21.5, 5);
+          line(21.5, 19);
+          line(2.5, 19);
+          canvas.closePath();
+          move(2.5, 19);
+          line(12, 11.2);
+          line(21.5, 19);
+        case FieldMark.phone:
+          // A handset curl turns to mud below 9pt; a mobile body survives it.
+          // Wider and shorter than a real handset's proportions on purpose: a
+          // tall thin rectangle carries less optical weight than the envelope
+          // and the pin beside it, and the column has to read as one rhythm.
+          move(7.0, 3.0);
+          line(17.0, 3.0);
+          line(17.0, 21.0);
+          line(7.0, 21.0);
+          canvas.closePath();
+          move(10.2, 6.1);
+          line(13.8, 6.1);
+        case FieldMark.location:
+          // Teardrop: tip at the baseline, bulb above, with its hole.
+          move(12, 2);
+          curve(12, 2, 4, 8.4, 4, 14);
+          curve(4, 18.4, 7.6, 22, 12, 22);
+          curve(16.4, 22, 20, 18.4, 20, 14);
+          curve(20, 8.4, 12, 2, 12, 2);
+          canvas.closePath();
+          circle(12, 14.2, 2.9);
+        case FieldMark.profile:
+          // Head and shoulders. Stands for a profile page — never a brand mark:
+          // the LinkedIn logo is a trademark and this app does not redraw it.
+          circle(12, 17, 4);
+          move(4, 2.6);
+          curve(4, 7.4, 7.6, 11, 12, 11);
+          curve(16.4, 11, 20, 7.4, 20, 2.6);
+        case FieldMark.website:
+          // Globe: rim, equator, and one meridian drawn as two halves.
+          circle(12, 12, 9.8);
+          move(2.2, 12);
+          line(21.8, 12);
+          move(12, 21.8);
+          curve(8.3, 18.2, 8.3, 5.8, 12, 2.2);
+          move(12, 21.8);
+          curve(15.7, 18.2, 15.7, 5.8, 12, 2.2);
+      }
+
+      canvas.strokePath();
+    },
+  );
 }
 
 /// Formats a date range, collapsing empties rather than emitting stray dashes.
