@@ -447,17 +447,21 @@ class AddEntryButton extends StatelessWidget {
   }
 }
 
-/// Month/year text entry.
+/// Month/year text entry, with a picker on the side.
 ///
-/// Deliberately free text rather than a date picker: resume dates are
-/// month-granular and often partial, and a picker would force a day the user
-/// never intended to state.
+/// Still free text, and that is not a fallback: resume dates are often partial
+/// ("2019", "Summer 2020") and the templates print whatever is here verbatim,
+/// so the keyboard has to stay a first-class way in. The picker exists because
+/// typing `YYYY-MM` from memory on a phone is a needless act of transcription,
+/// not because typing was wrong.
 ///
 /// Controller-backed for the same reason [ResumeTextField] is, and with one
 /// extra job: switching "I currently work here" on clears the end date in the
 /// model, and with a seeded field that cleared value never reached the screen —
 /// the user saw a date sitting in a field the PDF was already printing
-/// "Present" for.
+/// "Present" for. The picker rides on the same wire: it hands its answer to
+/// [onChanged] and waits for the model to come back, so a date chosen from the
+/// sheet reaches the screen by the one path that is already proven.
 class MonthYearField extends StatefulWidget {
   const MonthYearField({
     super.key,
@@ -486,6 +490,24 @@ class _MonthYearFieldState extends State<MonthYearField>
   @override
   String get modelValue => widget.value;
 
+  Future<void> _pick() async {
+    // The sheet needs the screen. Left up, the keyboard squeezes a
+    // scroll-controlled sheet into the top of the phone and puts the month
+    // grid behind the keys.
+    FocusScope.of(context).unfocus();
+
+    final picked = await showMonthYearPicker(
+      context,
+      // "Start" and "End" name a date on their own field; on a sheet covering
+      // half the screen they need to say what they are.
+      title: '${widget.label} date',
+      initial: MonthYear.tryParse(widget.value),
+      canClear: widget.value.trim().isNotEmpty,
+    );
+    if (picked == null || !mounted) return;
+    widget.onChanged(picked);
+  }
+
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
@@ -501,7 +523,364 @@ class _MonthYearFieldState extends State<MonthYearField>
           labelText: widget.label,
           hintText: 'YYYY-MM',
           helperText: widget.enabled ? null : widget.disabledHelper,
+          // Null while the field is switched off, so the current-role case
+          // cannot be talked into setting an end date the PDF would not print
+          // anyway. `IconButton` fades its own glyph when it has nothing to
+          // do, which is the same signal the disabled label and rule give.
+          suffixIcon: IconButton(
+            onPressed: widget.enabled ? _pick : null,
+            icon: const Icon(Icons.calendar_month_outlined),
+            // Icon-only control: without this it is unlabelled for screen
+            // readers and ambiguous by sight.
+            tooltip: 'Pick month and year',
+          ),
         ),
+      ),
+    );
+  }
+}
+
+/// A month and a year, which is all a resume date ever states.
+///
+/// There is no day here on purpose. Every template prints a month and a year,
+/// so a day-precision picker would collect a number the document cannot show
+/// and the user never meant to claim.
+@immutable
+class MonthYear {
+  const MonthYear(this.year, this.month);
+
+  final int year;
+
+  /// 1–12.
+  final int month;
+
+  /// Reads the `YYYY-MM` the field writes.
+  ///
+  /// Returns null for anything else — including the partial and free-form
+  /// dates the field still accepts — because those have no single month for a
+  /// picker to open on. A null start is not an error; it just means the sheet
+  /// opens on the current year.
+  static MonthYear? tryParse(String raw) {
+    final match = RegExp(r'^(\d{4})-(\d{1,2})$').firstMatch(raw.trim());
+    if (match == null) return null;
+    final month = int.parse(match.group(2)!);
+    if (month < 1 || month > 12) return null;
+    return MonthYear(int.parse(match.group(1)!), month);
+  }
+
+  /// The one shape the field, storage and the templates all agree on.
+  String format() => '$year-${month.toString().padLeft(2, '0')}';
+
+  @override
+  bool operator ==(Object other) =>
+      other is MonthYear && other.year == year && other.month == month;
+
+  @override
+  int get hashCode => Object.hash(year, month);
+
+  @override
+  String toString() => format();
+}
+
+/// Widest the picker sheet grows.
+///
+/// Matches the measure the editor form and the app's chooser sheets already
+/// use: a sheet spanning a 768px tablet strands twelve small chips beside a
+/// hand's width of empty space.
+const _pickerMaxWidth = 640.0;
+
+/// Asks for a month and a year.
+///
+/// Returns null when the user dismisses the sheet — by the handle, the barrier
+/// or the back gesture — which the caller must treat as "changed their mind"
+/// and leave the field exactly as it was. An empty string means "no date", and
+/// anything else is a `YYYY-MM`.
+///
+/// A sheet rather than a dialog, and rather than [showDatePicker]. The stock
+/// picker is day-precision and would produce dates no template can render; a
+/// sheet is what this app already opens when a flow branches, it puts the
+/// months where a thumb is, and — being scroll-controlled — it survives double
+/// text size on a small phone by scrolling, which a dialog of the same content
+/// does not.
+Future<String?> showMonthYearPicker(
+  BuildContext context, {
+  required String title,
+  MonthYear? initial,
+  bool canClear = false,
+}) {
+  return showModalBottomSheet<String>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    constraints: const BoxConstraints(maxWidth: _pickerMaxWidth),
+    builder: (context) =>
+        _MonthYearSheet(title: title, initial: initial, canClear: canClear),
+  );
+}
+
+class _MonthYearSheet extends StatefulWidget {
+  const _MonthYearSheet({
+    required this.title,
+    required this.initial,
+    required this.canClear,
+  });
+
+  final String title;
+  final MonthYear? initial;
+  final bool canClear;
+
+  @override
+  State<_MonthYearSheet> createState() => _MonthYearSheetState();
+}
+
+class _MonthYearSheetState extends State<_MonthYearSheet> {
+  static const _shortMonths = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+
+  /// Read by screen readers and by anyone holding a chip down: "Sep" is a
+  /// three-letter abbreviation, and abbreviations are what a screen reader
+  /// spells out one letter at a time.
+  static const _months = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
+
+  /// Far enough back to cover a first degree for anyone still working, and far
+  /// enough forward for an expected graduation date. Not further forward than
+  /// that: every future year is a row the list has to be scrolled past to
+  /// reach the years people actually put on a resume.
+  static const _minYear = 1950;
+  static final _maxYear = DateTime.now().year + 5;
+
+  late int _year = widget.initial?.year ?? DateTime.now().year;
+
+  /// True while the year list has replaced the months.
+  ///
+  /// It replaces them rather than sitting above them so the sheet holds one
+  /// scrolling list at a time: eighty years nested inside a scroll view that
+  /// also scrolls is two gestures fighting over one finger.
+  bool _pickingYear = false;
+
+  void _chooseMonth(int month) =>
+      Navigator.of(context).pop(MonthYear(_year, month).format());
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tokens = context.tokens;
+
+    return SafeArea(
+      // The route already holds the top edge clear (`useSafeArea`); taking it
+      // again here would pad the sheet twice.
+      top: false,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: tokens.spaceLg),
+              child: Semantics(
+                header: true,
+                child: Text(
+                  widget.title,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    // Large and tight, matching the app bar and the form's
+                    // section headings.
+                    letterSpacing: -0.2,
+                  ),
+                ),
+              ),
+            ),
+            _YearBar(
+              year: _year,
+              expanded: _pickingYear,
+              onPrevious: _year > _minYear
+                  ? () => setState(() => _year--)
+                  : null,
+              onNext: _year < _maxYear ? () => setState(() => _year++) : null,
+              onToggle: () => setState(() => _pickingYear = !_pickingYear),
+            ),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                tokens.spaceLg,
+                0,
+                tokens.spaceLg,
+                tokens.spaceMd,
+              ),
+              child: _pickingYear ? _years() : _monthGrid(),
+            ),
+            if (widget.canClear)
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  tokens.spaceLg,
+                  0,
+                  tokens.spaceLg,
+                  tokens.spaceMd,
+                ),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => Navigator.of(context).pop(''),
+                    icon: const Icon(Icons.backspace_outlined, size: 18),
+                    label: const Text('Clear date'),
+                  ),
+                ),
+              ),
+            SizedBox(height: tokens.spaceMd),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Chip lettering.
+  ///
+  /// `copyWith` on the theme's own style, never a bare [TextStyle]: a bare one
+  /// drops `ThemeData.fontFamily` and falls back to Roboto — the wrong face on
+  /// device and no face at all on web, where Roboto is not bundled. The
+  /// gallery's category chips carry the same note for the same reason.
+  TextStyle? _chipLabelStyle(ThemeData theme) =>
+      theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurface);
+
+  Widget _monthGrid() {
+    final theme = Theme.of(context);
+    final tokens = context.tokens;
+    final selected = widget.initial;
+
+    // Wrap rather than a fixed grid: three columns is right at normal text
+    // size and wrong at double, and a Wrap reflows to whatever actually fits
+    // instead of clipping the month names.
+    return Wrap(
+      spacing: tokens.spaceSm,
+      runSpacing: tokens.spaceSm,
+      children: [
+        for (var month = 1; month <= 12; month++)
+          ChoiceChip(
+            label: Text(_shortMonths[month - 1]),
+            labelStyle: _chipLabelStyle(theme),
+            tooltip: _months[month - 1],
+            selected: selected?.month == month && selected?.year == _year,
+            onSelected: (_) => _chooseMonth(month),
+          ),
+      ],
+    );
+  }
+
+  Widget _years() {
+    final theme = Theme.of(context);
+    final tokens = context.tokens;
+
+    // Newest first. The years anyone is most likely to want are the last
+    // twenty, and putting 1950 at the top would mean scrolling past seventy
+    // of them to reach the common case.
+    return Wrap(
+      spacing: tokens.spaceSm,
+      runSpacing: tokens.spaceSm,
+      children: [
+        for (var year = _maxYear; year >= _minYear; year--)
+          ChoiceChip(
+            label: Text('$year'),
+            labelStyle: _chipLabelStyle(theme),
+            selected: year == _year,
+            onSelected: (_) => setState(() {
+              _year = year;
+              _pickingYear = false;
+            }),
+          ),
+      ],
+    );
+  }
+}
+
+/// The year, and the three ways to change it.
+///
+/// A stepper for the common nudge of one year either way, and the year itself
+/// as a button onto the full list for the graduation date that is forty years
+/// back and would otherwise cost forty taps.
+class _YearBar extends StatelessWidget {
+  const _YearBar({
+    required this.year,
+    required this.expanded,
+    required this.onPrevious,
+    required this.onNext,
+    required this.onToggle,
+  });
+
+  final int year;
+  final bool expanded;
+
+  /// Null at the end of the range, so the arrow reads as unavailable rather
+  /// than dead.
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: tokens.spaceSm),
+      child: Row(
+        children: [
+          IconButton(
+            onPressed: onPrevious,
+            icon: const Icon(Icons.chevron_left),
+            tooltip: 'Previous year',
+          ),
+          // Expanded, so the arrows keep their full touch targets and the
+          // year takes whatever is left at any text size.
+          Expanded(
+            child: TextButton(
+              onPressed: onToggle,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      '$year',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Icon(
+                    expanded ? Icons.arrow_drop_up : Icons.arrow_drop_down,
+                    size: 20,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            onPressed: onNext,
+            icon: const Icon(Icons.chevron_right),
+            tooltip: 'Next year',
+          ),
+        ],
       ),
     );
   }

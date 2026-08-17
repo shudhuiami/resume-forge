@@ -87,6 +87,49 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     super.dispose();
   }
 
+  /// True from the tap on Done until the editor is off the stack. Keeps a
+  /// double tap from popping twice, which would take the resume list with it.
+  bool _leaving = false;
+
+  /// Flushes anything still owed to storage, then goes back to the list.
+  ///
+  /// Not a save button, and deliberately not labelled as one: every keystroke
+  /// is already on its way to disk and the indicator beside the title has been
+  /// saying so. What this adds is the *end* of the job — a way out that is a
+  /// control rather than a gesture, and one that closes the one window where
+  /// leaving could show the list a stale row: the 800ms the autosave debounce
+  /// is still counting down.
+  ///
+  /// No toast on the way out. It would fire on every single exit to repeat
+  /// what the indicator already said, and the list the user lands on shows the
+  /// saved document itself — a confirmation that something was written, from
+  /// the thing that was written. Toasts in this app are spent on outcomes
+  /// nothing on screen can show.
+  Future<void> _done() async {
+    if (_leaving) return;
+    _leaving = true;
+    try {
+      await _controller.saveNow();
+      if (!mounted) return;
+
+      // The one exit worth interrupting. Leaving now would drop the edits
+      // with the controller, so this stays put and says why instead.
+      if (_controller.state.saveState == SaveState.failed) {
+        AppToast.show(
+          context,
+          message: 'Could not save this resume. Your changes are still here.',
+          variant: ToastVariant.error,
+          actionLabel: 'Try again',
+          onAction: _done,
+        );
+        return;
+      }
+      Navigator.of(context).pop();
+    } finally {
+      _leaving = false;
+    }
+  }
+
   /// True from the tap until the platform has been handed the PDF. Keeps the
   /// action from being fired twice, which would build the document twice and
   /// stack two share sheets.
@@ -461,10 +504,12 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
         final state = _controller.state;
         return Scaffold(
           appBar: AppBar(
-            title: Text(
-              state.doc.displayTitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            // Measured, because the title is two lines and a toolbar does not
+            // grow to fit one.
+            toolbarHeight: _EditorTitle.toolbarHeight(context),
+            title: _EditorTitle(
+              title: state.doc.displayTitle,
+              saveState: state.saveState,
             ),
             bottom: TabBar(
               controller: _tabs,
@@ -489,6 +534,16 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                       )
                     : const Icon(Icons.ios_share),
                 tooltip: 'Export PDF',
+              ),
+              // The finishing action, next to the overflow menu where an
+              // "I am done here" control belongs. A check rather than a word
+              // because every other control in this bar is a glyph, and a
+              // 74px text button here costs the document title more room than
+              // a 360px phone has to give.
+              IconButton(
+                onPressed: _done,
+                icon: const Icon(Icons.check),
+                tooltip: 'Done',
               ),
               // Whole-document actions live here rather than in a button row
               // above the fields: both are used at most once per resume, and a
@@ -548,6 +603,160 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The document's name, and one quiet line under it about whether it is safe.
+///
+/// The editor autosaves and always has, which is fine right up until someone
+/// wants to be *sure* — at which point an editor with no visible save state is
+/// indistinguishable from one that is quietly losing their work. This is the
+/// answer to that, not a save button: it reports what the controller is
+/// actually doing rather than offering a lever that repeats what already
+/// happened.
+///
+/// **A second line rather than a chip beside the name.** Laid out inline it
+/// was measured off the screen: with a leading arrow and four actions, a 360px
+/// phone leaves the title around 100px, and the status could only fit by
+/// dropping to a bare glyph — which is not reassurance, it is a symbol nobody
+/// asked to learn. Stacked, the word is always there and the name keeps the
+/// width it had before this existed. It costs no height at all at normal text
+/// size: two lines come to 46px inside the 56px toolbar.
+class _EditorTitle extends StatelessWidget {
+  const _EditorTitle({required this.title, required this.saveState});
+
+  final String title;
+  final SaveState saveState;
+
+  /// Air above and below the two lines, so the block is not pressed against
+  /// the status bar and the tab strip.
+  static const _breathing = 12.0;
+
+  /// How tall the toolbar has to be for both lines at the current text size.
+  ///
+  /// [AppBar] does not grow to fit its title — the toolbar is a fixed box and
+  /// a title taller than it overflows — so the height is measured with the
+  /// real styles at the real scale rather than assumed. Never below
+  /// [kToolbarHeight], so nothing shrinks the bar below the standard.
+  static double toolbarHeight(BuildContext context) {
+    final theme = Theme.of(context);
+    final titleLine = _measureText(
+      context,
+      'Ag',
+      theme.appBarTheme.titleTextStyle ?? theme.textTheme.titleLarge,
+    ).height;
+    final statusLine = math.max(
+      _SaveStatus.glyphSize,
+      _measureText(context, 'Ag', _statusStyle(theme, saveOk: true)).height,
+    );
+    return math.max(kToolbarHeight, titleLine + statusLine + _breathing);
+  }
+
+  static TextStyle? _statusStyle(ThemeData theme, {required bool saveOk}) =>
+      theme.textTheme.labelMedium?.copyWith(
+        color: saveOk
+            ? theme.colorScheme.onSurfaceVariant
+            : theme.colorScheme.error,
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        _SaveStatus(
+          state: saveState,
+          labelStyle: _statusStyle(
+            theme,
+            saveOk: saveState != SaveState.failed,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Size [text] takes at the current text size, laid out with the real style.
+///
+/// Measured rather than assumed for the same reason the skill rating label is:
+/// a number that is right at one text size is wrong at every other one.
+Size _measureText(BuildContext context, String text, TextStyle? style) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textScaler: MediaQuery.textScalerOf(context),
+    maxLines: 1,
+    textDirection: Directionality.of(context),
+  )..layout();
+  final size = painter.size;
+  painter.dispose();
+  return size;
+}
+
+/// Saving / saved / not saved, in that order of interest.
+///
+/// Deliberately unshowy: muted ink, label type, no animation and no live
+/// region. It changes on every keystroke, and a status that announced itself
+/// each time — a spinner, a flash, a screen reader interrupt — would be an
+/// alarm bell wired to the space bar. It is here to be *checked*, not noticed.
+class _SaveStatus extends StatelessWidget {
+  const _SaveStatus({required this.state, required this.labelStyle});
+
+  final SaveState state;
+  final TextStyle? labelStyle;
+
+  /// Fixed, like every other glyph in the chrome: it is a mark, not a line of
+  /// copy, and growing it with the type size only steals width from the word
+  /// beside it.
+  static const glyphSize = 16.0;
+
+  static String labelFor(SaveState state) => switch (state) {
+    SaveState.saved => 'Saved',
+    SaveState.saving => 'Saving…',
+    SaveState.failed => 'Not saved',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final label = labelFor(state);
+
+    return Semantics(
+      label: label,
+      // One node saying one thing. Unmerged, the glyph and the word are two
+      // separate stops either side of the document's name.
+      excludeSemantics: true,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            switch (state) {
+              SaveState.saved => Icons.check_circle_outline,
+              SaveState.saving => Icons.sync,
+              SaveState.failed => Icons.error_outline,
+            },
+            size: glyphSize,
+            color: labelStyle?.color,
+          ),
+          SizedBox(width: tokens.spaceXs),
+          // Flexible: at double text size "Not saved" is wider than the title
+          // slot a small phone can spare, and an ellipsis is the one outcome
+          // here that is neither an overflow nor a lie.
+          Flexible(
+            child: Text(
+              label,
+              style: labelStyle,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -812,36 +1021,26 @@ class _EditorForm extends StatelessWidget {
                     onChanged: (v) =>
                         _editExperience(e.id, (x) => x.copyWith(company: v)),
                   ),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: MonthYearField(
-                          label: 'Start',
-                          value: e.startDate,
-                          onChanged: (v) => _editExperience(
-                            e.id,
-                            (x) => x.copyWith(startDate: v),
-                          ),
-                        ),
+                  _DateFieldPair(
+                    start: MonthYearField(
+                      label: 'Start',
+                      value: e.startDate,
+                      onChanged: (v) => _editExperience(
+                        e.id,
+                        (x) => x.copyWith(startDate: v),
                       ),
-                      SizedBox(width: tokens.spaceMd),
-                      Expanded(
-                        child: MonthYearField(
-                          label: 'End',
-                          value: e.endDate,
-                          enabled: !e.current,
-                          // The switch below turns this field off, and a field
-                          // that has gone quiet with no explanation reads as
-                          // broken. This says what the PDF will print instead.
-                          disabledHelper: 'Shows “Present”',
-                          onChanged: (v) => _editExperience(
-                            e.id,
-                            (x) => x.copyWith(endDate: v),
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
+                    end: MonthYearField(
+                      label: 'End',
+                      value: e.endDate,
+                      enabled: !e.current,
+                      // The switch below turns this field off, and a field
+                      // that has gone quiet with no explanation reads as
+                      // broken. This says what the PDF will print instead.
+                      disabledHelper: 'Shows “Present”',
+                      onChanged: (v) =>
+                          _editExperience(e.id, (x) => x.copyWith(endDate: v)),
+                    ),
                   ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
@@ -917,30 +1116,19 @@ class _EditorForm extends StatelessWidget {
                     onChanged: (v) =>
                         _editEducation(e.id, (x) => x.copyWith(field: v)),
                   ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: MonthYearField(
-                          label: 'Start',
-                          value: e.startDate,
-                          onChanged: (v) => _editEducation(
-                            e.id,
-                            (x) => x.copyWith(startDate: v),
-                          ),
-                        ),
-                      ),
-                      SizedBox(width: tokens.spaceMd),
-                      Expanded(
-                        child: MonthYearField(
-                          label: 'End',
-                          value: e.endDate,
-                          onChanged: (v) => _editEducation(
-                            e.id,
-                            (x) => x.copyWith(endDate: v),
-                          ),
-                        ),
-                      ),
-                    ],
+                  _DateFieldPair(
+                    start: MonthYearField(
+                      label: 'Start',
+                      value: e.startDate,
+                      onChanged: (v) =>
+                          _editEducation(e.id, (x) => x.copyWith(startDate: v)),
+                    ),
+                    end: MonthYearField(
+                      label: 'End',
+                      value: e.endDate,
+                      onChanged: (v) =>
+                          _editEducation(e.id, (x) => x.copyWith(endDate: v)),
+                    ),
                   ),
                 ],
               ),
@@ -1213,6 +1401,66 @@ class _EditorForm extends StatelessWidget {
       ],
     ),
   );
+}
+
+/// A start date and an end date: side by side while they fit, stacked when
+/// they stop fitting.
+///
+/// Two dates on one line is the right shape for a form — a role's dates are
+/// one fact and reading them as a pair is faster than reading them as a list —
+/// right up until half a row cannot hold a date. With the picker button taking
+/// a 48px touch target out of each column, double text size on a 360px phone
+/// leaves about 94px for the value, and `2019-04` needs more than that: the
+/// user's own date gets clipped inside its own field, which is a worse failure
+/// than a taller form.
+///
+/// The switch is measured rather than set at a width breakpoint, because what
+/// runs out of room is a string at a text size, not a screen.
+class _DateFieldPair extends StatelessWidget {
+  const _DateFieldPair({required this.start, required this.end});
+
+  final Widget start;
+  final Widget end;
+
+  /// The longest value the field accepts, laid out to find out how much room a
+  /// date actually needs here.
+  static const _widestValue = '2019-04';
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tokens = context.tokens;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Everything in the field that is not the value: the decoration's
+        // leading content padding, and the picker button's touch target.
+        final chrome = tokens.spaceLg + tokens.minTouchTarget;
+        final needed =
+            _measureText(
+              context,
+              _widestValue,
+              theme.textTheme.bodyLarge,
+            ).width +
+            chrome;
+        final column = (constraints.maxWidth - tokens.spaceMd) / 2;
+
+        if (column < needed) {
+          return Column(children: [start, end]);
+        }
+        return Row(
+          // The disabled end date carries a helper line under it, so the two
+          // columns are not the same height.
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: start),
+            SizedBox(width: tokens.spaceMd),
+            Expanded(child: end),
+          ],
+        );
+      },
+    );
+  }
 }
 
 class _SkillSlider extends StatelessWidget {

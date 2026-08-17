@@ -8,6 +8,25 @@ import '../render/preview_engine.dart';
 import '../render/truncation_check.dart';
 import '../templates/registry.dart';
 
+/// What the editor may honestly say about the user's work right now.
+///
+/// Derived from the controller's own bookkeeping rather than tracked
+/// separately: an indicator with its own timer would eventually disagree with
+/// the writes actually happening, and a "Saved" that is really a countdown is
+/// worse than no indicator at all.
+enum SaveState {
+  /// Everything on screen is on disk.
+  saved,
+
+  /// There are changes that have not been written yet — the autosave debounce
+  /// is counting down, or a write is in flight.
+  saving,
+
+  /// The last write threw. The work is still held in memory and the next edit
+  /// re-arms a retry, but nothing may claim it is safe.
+  failed,
+}
+
 @immutable
 class EditorState {
   const EditorState({
@@ -16,6 +35,7 @@ class EditorState {
     this.isRendering = false,
     this.renderError,
     this.hasUnsavedChanges = false,
+    this.saveFailed = false,
     this.truncation = const TruncationReport.none(),
   });
 
@@ -29,11 +49,25 @@ class EditorState {
   final Object? renderError;
   final bool hasUnsavedChanges;
 
+  /// True when the last write attempt threw.
+  ///
+  /// Kept separate from [hasUnsavedChanges] — which stays true either way —
+  /// because "not written yet" and "could not be written" are different things
+  /// to tell someone about their resume, and only one of them is a reason to
+  /// stop and look.
+  final bool saveFailed;
+
   /// Sections the current design could not fit on the page. Empty when
   /// everything the user typed actually reaches the PDF.
   final TruncationReport truncation;
 
   ResumeData get data => doc.data;
+
+  /// The single answer the editor's save indicator reads.
+  SaveState get saveState {
+    if (saveFailed) return SaveState.failed;
+    return hasUnsavedChanges ? SaveState.saving : SaveState.saved;
+  }
 
   EditorState copyWith({
     ResumeDocument? doc,
@@ -41,6 +75,7 @@ class EditorState {
     bool? isRendering,
     Object? renderError = _noChange,
     bool? hasUnsavedChanges,
+    bool? saveFailed,
     TruncationReport? truncation,
   }) {
     return EditorState(
@@ -51,6 +86,7 @@ class EditorState {
           ? this.renderError
           : renderError,
       hasUnsavedChanges: hasUnsavedChanges ?? this.hasUnsavedChanges,
+      saveFailed: saveFailed ?? this.saveFailed,
       truncation: truncation ?? this.truncation,
     );
   }
@@ -120,6 +156,10 @@ class EditorController extends ChangeNotifier {
     state = state.copyWith(
       doc: state.doc.copyWith(data: next, updatedAt: DateTime.now()),
       hasUnsavedChanges: true,
+      // A fresh edit arms a fresh write, so the last failure stops being the
+      // current answer: the indicator goes back to "saving" and reports what
+      // *this* attempt does.
+      saveFailed: false,
       isRendering: true,
     );
     _requestPreview();
@@ -137,6 +177,7 @@ class EditorController extends ChangeNotifier {
         updatedAt: DateTime.now(),
       ),
       hasUnsavedChanges: true,
+      saveFailed: false,
       isRendering: true,
     );
     _requestPreview();
@@ -164,6 +205,10 @@ class EditorController extends ChangeNotifier {
   /// Writes immediately. Called by the debounce, on app pause, and on leaving
   /// the editor — a backgrounded mobile app can be killed without warning, so
   /// waiting out a debounce is not safe.
+  ///
+  /// Never throws: a failed write is reported through [EditorState.saveState]
+  /// so a caller that awaited this can ask what happened rather than having to
+  /// catch, and so the indicator in the app bar has something true to show.
   Future<void> saveNow() async {
     _autosave?.cancel();
     if (_disposed) return;
@@ -171,10 +216,14 @@ class EditorController extends ChangeNotifier {
     try {
       await repository.save(doc);
       if (_disposed) return;
-      state = state.copyWith(hasUnsavedChanges: false);
+      state = state.copyWith(hasUnsavedChanges: false, saveFailed: false);
     } catch (_) {
       // Keep the dirty flag so a later save retries rather than silently
-      // dropping the user's work.
+      // dropping the user's work, and record that the attempt failed — an
+      // indicator still reading "Saving…" for a write that already gave up is
+      // exactly the reassuring lie it exists to avoid telling.
+      if (_disposed) return;
+      state = state.copyWith(saveFailed: true);
     }
   }
 
