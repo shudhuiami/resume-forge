@@ -263,9 +263,22 @@ class TerminalTemplate extends ResumeTemplate {
       info.email,
       info.phone,
       info.location,
+    ].where((e) => e.trim().isNotEmpty).toList();
+    final links = <String>[
       info.linkedin,
       info.website,
-    ].where((e) => e.trim().isNotEmpty).take(5).toList();
+    ].where((e) => e.trim().isNotEmpty).toList();
+
+    final bulletStyle = pw.TextStyle(
+      font: mono.bold,
+      fontSize: 7.6,
+      color: p.primary,
+    );
+    final itemStyle = pw.TextStyle(
+      font: mono.regular,
+      fontSize: 7.6,
+      color: p.ink,
+    );
 
     return pw.SizedBox(
       width: _contentW,
@@ -323,24 +336,35 @@ class TerminalTemplate extends ResumeTemplate {
                   pw.Row(
                     mainAxisSize: pw.MainAxisSize.min,
                     children: [
-                      clampedText(
-                        '· ',
-                        style: pw.TextStyle(
-                          font: mono.bold,
-                          fontSize: 7.6,
-                          color: p.primary,
-                        ),
-                      ),
-                      clampedText(
-                        line,
-                        style: pw.TextStyle(
-                          font: mono.regular,
-                          fontSize: 7.6,
-                          color: p.ink,
-                        ),
-                      ),
+                      clampedText('· ', style: bulletStyle),
+                      clampedText(line, style: itemStyle),
                     ],
                   ),
+              ],
+            ),
+          ],
+          // Links share one bulleted line instead of taking a Wrap run each.
+          // Monospace at this size is wide enough that two long URLs claimed a
+          // whole extra run, which grew this block and cost the page its
+          // education section outright — dart_pdf's Column drops the child it
+          // cannot fit rather than trimming it.
+          if (links.isNotEmpty) ...[
+            pw.SizedBox(height: contact.isEmpty ? 12 : 4),
+            pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                clampedText('· ', style: bulletStyle),
+                pw.Expanded(
+                  child: contactStrip(
+                    [for (final l in links) (l, true)],
+                    // One line only: monospace is wide, and a second run here
+                    // costs the page its education block.
+                    maxLines: 1,
+                    style: itemStyle,
+                    separator: '  ·  ',
+                    separatorStyle: bulletStyle,
+                  ),
+                ),
               ],
             ),
           ],
@@ -500,26 +524,21 @@ class TerminalTemplate extends ResumeTemplate {
                 ),
               ),
               pw.Expanded(
-                child: clampedText(
-                  pr.name,
-                  style: pw.TextStyle(
+                child: titleWithUrl(
+                  title: pr.name,
+                  titleStyle: pw.TextStyle(
                     font: sans.bold,
                     fontSize: 10.2,
                     color: p.ink,
                   ),
-                ),
-              ),
-              if (pr.link.trim().isNotEmpty) ...[
-                pw.SizedBox(width: 10),
-                clampedText(
-                  pr.link,
-                  style: pw.TextStyle(
+                  url: pr.link,
+                  urlStyle: pw.TextStyle(
                     font: mono.regular,
                     fontSize: 7.6,
                     color: p.secondary,
                   ),
                 ),
-              ],
+              ),
             ],
           ),
           if (pr.description.trim().isNotEmpty) ...[

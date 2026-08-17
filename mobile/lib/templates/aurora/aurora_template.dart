@@ -200,28 +200,37 @@ class AuroraTemplate extends ResumeTemplate {
       info.email,
       info.phone,
       info.location,
+    ].where((e) => e.trim().isNotEmpty).toList();
+    final links = <String>[
       info.linkedin,
       info.website,
     ].where((e) => e.trim().isNotEmpty).toList();
 
+    final contactStyle = pw.TextStyle(
+      font: sans.regular,
+      fontSize: 8.6,
+      color: p.muted,
+      lineSpacing: 1.4,
+    );
+
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        if (contact.isNotEmpty) ...[
+        if (contact.isNotEmpty || links.isNotEmpty) ...[
           _sectionTitle('Contact', sans, p),
           ...contact.map(
             (line) => pw.Padding(
               padding: const pw.EdgeInsets.only(bottom: 4),
-              child: clampedText(
-                line,
-                maxLines: 2,
-                style: pw.TextStyle(
-                  font: sans.regular,
-                  fontSize: 8.6,
-                  color: p.muted,
-                  lineSpacing: 1.4,
-                ),
-              ),
+              child: clampedText(line, maxLines: 2, style: contactStyle),
+            ),
+          ),
+          // Links get the URL rule's multi-line form: the sidebar is ~174pt
+          // wide, so a real LinkedIn URL needs two lines and must break at a
+          // path separator rather than mid-handle.
+          ...links.map(
+            (line) => pw.Padding(
+              padding: const pw.EdgeInsets.only(bottom: 4),
+              child: urlText(line, maxLines: 3, style: contactStyle),
             ),
           ),
           pw.SizedBox(height: 14),
@@ -536,13 +545,25 @@ class AuroraTemplate extends ResumeTemplate {
         child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            clampedText(
-              pr.name,
-              style: pw.TextStyle(
+            // The link was never drawn here at all, so a project URL the user
+            // typed silently never reached the PDF (QA-1). It goes on the title
+            // line, where every other design in the catalog puts it and where
+            // it costs the card no extra height.
+            titleWithUrl(
+              title: pr.name,
+              titleStyle: pw.TextStyle(
                 font: sans.semiBold,
                 fontSize: 9.5,
                 color: p.ink,
               ),
+              url: pr.link,
+              urlStyle: pw.TextStyle(
+                font: sans.regular,
+                fontSize: 8,
+                color: p.primary,
+              ),
+              gap: 8,
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
             ),
             if (pr.description.trim().isNotEmpty) ...[
               pw.SizedBox(height: 2),

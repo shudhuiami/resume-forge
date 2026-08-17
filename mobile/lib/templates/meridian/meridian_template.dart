@@ -101,12 +101,12 @@ class MeridianTemplate extends ResumeTemplate {
     final photo = tryDecodePhoto(info.photo);
     final photoSize = _sidebarWidth - _sidebarPadding * 2;
 
-    final contact = <(String, String)>[
-      ('Email', info.email),
-      ('Phone', info.phone),
-      ('Location', info.location),
-      ('LinkedIn', info.linkedin),
-      ('Web', info.website),
+    final contact = <(String, String, bool)>[
+      ('Email', info.email, false),
+      ('Phone', info.phone, false),
+      ('Location', info.location, false),
+      ('LinkedIn', info.linkedin, true),
+      ('Web', info.website, true),
     ].where((e) => e.$2.trim().isNotEmpty).toList();
 
     return pw.Padding(
@@ -134,7 +134,7 @@ class MeridianTemplate extends ResumeTemplate {
           ],
           if (contact.isNotEmpty) ...[
             _sidebarHeading('Contact', sans, ctx.palette),
-            ...contact.map((c) => _contactLine(c.$1, c.$2, sans)),
+            ...contact.map((c) => _contactLine(c.$1, c.$2, sans, isUrl: c.$3)),
             pw.SizedBox(height: 16),
           ],
           if (data.skills.isNotEmpty) ...[
@@ -179,7 +179,19 @@ class MeridianTemplate extends ResumeTemplate {
     );
   }
 
-  pw.Widget _contactLine(String label, String value, LoadedFamily sans) {
+  pw.Widget _contactLine(
+    String label,
+    String value,
+    LoadedFamily sans, {
+    bool isUrl = false,
+  }) {
+    final valueStyle = pw.TextStyle(
+      font: sans.regular,
+      fontSize: 8.4,
+      color: _onSlate,
+      lineSpacing: 1.3,
+    );
+
     return pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 7),
       child: pw.Column(
@@ -195,16 +207,12 @@ class MeridianTemplate extends ResumeTemplate {
             ),
           ),
           pw.SizedBox(height: 1),
-          clampedText(
-            value,
-            maxLines: 2,
-            style: pw.TextStyle(
-              font: sans.regular,
-              fontSize: 8.4,
-              color: _onSlate,
-              lineSpacing: 1.3,
-            ),
-          ),
+          // The sidebar's text column is 148pt; a real profile URL needs three
+          // lines there, broken at path separators rather than mid-handle.
+          if (isUrl)
+            urlText(value, maxLines: 3, style: valueStyle)
+          else
+            clampedText(value, maxLines: 2, style: valueStyle),
         ],
       ),
     );
@@ -467,31 +475,19 @@ class MeridianTemplate extends ResumeTemplate {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Expanded(
-                child: clampedText(
-                  pr.name,
-                  style: pw.TextStyle(
-                    font: sans.semiBold,
-                    fontSize: 10.4,
-                    color: p.secondary,
-                  ),
-                ),
-              ),
-              if (pr.link.trim().isNotEmpty) ...[
-                pw.SizedBox(width: 10),
-                clampedText(
-                  pr.link,
-                  style: pw.TextStyle(
-                    font: sans.regular,
-                    fontSize: 7.8,
-                    color: p.muted,
-                  ),
-                ),
-              ],
-            ],
+          titleWithUrl(
+            title: pr.name,
+            titleStyle: pw.TextStyle(
+              font: sans.semiBold,
+              fontSize: 10.4,
+              color: p.secondary,
+            ),
+            url: pr.link,
+            urlStyle: pw.TextStyle(
+              font: sans.regular,
+              fontSize: 7.8,
+              color: p.muted,
+            ),
           ),
           if (pr.description.trim().isNotEmpty) ...[
             pw.SizedBox(height: 2),

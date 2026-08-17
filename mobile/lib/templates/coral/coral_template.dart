@@ -162,13 +162,20 @@ class CoralTemplate extends ResumeTemplate {
     final info = ctx.data.personalInfo;
     final hasPhoto = tryDecodePhoto(info.photo) != null;
 
-    final contact = <String>[
-      info.email,
-      info.phone,
-      info.location,
-      info.linkedin,
-      info.website,
-    ].where((e) => e.trim().isNotEmpty).join('   ·   ');
+    final contact = <(String, bool)>[
+      (info.email, false),
+      (info.phone, false),
+      (info.location, false),
+      (info.linkedin, true),
+      (info.website, true),
+    ];
+
+    final contactStyle = pw.TextStyle(
+      font: sans.regular,
+      fontSize: 8.2,
+      color: p.muted,
+      lineSpacing: 1.6,
+    );
 
     return pw.Padding(
       padding: pw.EdgeInsets.fromLTRB(
@@ -203,20 +210,12 @@ class CoralTemplate extends ResumeTemplate {
               ),
             ),
           ],
-          if (contact.isNotEmpty) ...[
-            pw.SizedBox(height: 11),
-            clampedText(
-              contact,
-              maxLines: 2,
-              align: pw.TextAlign.center,
-              style: pw.TextStyle(
-                font: sans.regular,
-                fontSize: 8.2,
-                color: p.muted,
-                lineSpacing: 1.6,
-              ),
-            ),
-          ],
+          pw.SizedBox(height: 11),
+          contactStrip(
+            contact,
+            style: contactStyle,
+            alignment: pw.WrapAlignment.center,
+          ),
           pw.SizedBox(height: hasPhoto ? 10 : 16),
           pw.Container(width: 46, height: 2, color: p.secondary),
         ],
@@ -464,13 +463,23 @@ class CoralTemplate extends ResumeTemplate {
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                clampedText(
-                  pr.name,
-                  style: pw.TextStyle(
+                // The link was never drawn here at all, so a project URL the
+                // user typed silently never reached the PDF (QA-1).
+                titleWithUrl(
+                  title: pr.name,
+                  titleStyle: pw.TextStyle(
                     font: sans.semiBold,
                     fontSize: 10.2,
                     color: p.ink,
                   ),
+                  url: pr.link,
+                  urlStyle: pw.TextStyle(
+                    font: sans.regular,
+                    fontSize: 8.2,
+                    color: p.primary,
+                  ),
+                  gap: 8,
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
                 ),
                 if (pr.description.trim().isNotEmpty) ...[
                   pw.SizedBox(height: 2),

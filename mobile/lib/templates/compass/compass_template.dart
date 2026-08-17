@@ -187,13 +187,20 @@ class CompassTemplate extends ResumeTemplate {
     final p = ctx.palette;
     final info = data.personalInfo;
 
-    final contact = <(String, String)>[
-      ('Email', info.email),
-      ('Phone', info.phone),
-      ('Location', info.location),
-      ('LinkedIn', info.linkedin),
-      ('Web', info.website),
+    final contact = <(String, String, bool)>[
+      ('Email', info.email, false),
+      ('Phone', info.phone, false),
+      ('Location', info.location, false),
+      ('LinkedIn', info.linkedin, true),
+      ('Web', info.website, true),
     ].where((e) => e.$2.trim().isNotEmpty).toList();
+
+    final valueStyle = pw.TextStyle(
+      font: sans.regular,
+      fontSize: 8.8,
+      color: p.muted,
+      lineSpacing: 1.3,
+    );
 
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -215,16 +222,12 @@ class CompassTemplate extends ResumeTemplate {
                       letterSpacing: 0.9,
                     ),
                   ),
-                  clampedText(
-                    c.$2,
-                    maxLines: 2,
-                    style: pw.TextStyle(
-                      font: sans.regular,
-                      fontSize: 8.8,
-                      color: p.muted,
-                      lineSpacing: 1.3,
-                    ),
-                  ),
+                  // A URL in this ~180pt column needs to break at a path
+                  // separator, not wherever the glyph run happens to stop.
+                  if (c.$3)
+                    urlText(c.$2, maxLines: 3, style: valueStyle)
+                  else
+                    clampedText(c.$2, maxLines: 2, style: valueStyle),
                 ],
               ),
             ),
@@ -470,31 +473,21 @@ class CompassTemplate extends ResumeTemplate {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Row(
+          titleWithUrl(
+            title: pr.name,
+            titleStyle: pw.TextStyle(
+              font: sans.semiBold,
+              fontSize: 10.4,
+              color: p.secondary,
+            ),
+            url: pr.link,
+            urlStyle: pw.TextStyle(
+              font: sans.regular,
+              fontSize: 7.7,
+              color: p.muted,
+            ),
+            gap: 8,
             crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              pw.Expanded(
-                child: clampedText(
-                  pr.name,
-                  style: pw.TextStyle(
-                    font: sans.semiBold,
-                    fontSize: 10.4,
-                    color: p.secondary,
-                  ),
-                ),
-              ),
-              if (pr.link.trim().isNotEmpty) ...[
-                pw.SizedBox(width: 8),
-                clampedText(
-                  pr.link,
-                  style: pw.TextStyle(
-                    font: sans.regular,
-                    fontSize: 7.7,
-                    color: p.muted,
-                  ),
-                ),
-              ],
-            ],
           ),
           if (pr.description.trim().isNotEmpty) ...[
             pw.SizedBox(height: 2),

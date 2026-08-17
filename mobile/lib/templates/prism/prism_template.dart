@@ -116,13 +116,20 @@ class PrismTemplate extends ResumeTemplate {
     final info = ctx.data.personalInfo;
     final photo = tryDecodePhoto(info.photo);
 
-    final contact = <String>[
-      info.email,
-      info.phone,
-      info.location,
-      info.linkedin,
-      info.website,
-    ].where((e) => e.trim().isNotEmpty).join('   ·   ');
+    final contact = <(String, bool)>[
+      (info.email, false),
+      (info.phone, false),
+      (info.location, false),
+      (info.linkedin, true),
+      (info.website, true),
+    ];
+
+    final contactStyle = pw.TextStyle(
+      font: sans.regular,
+      fontSize: 8.3,
+      color: p.muted,
+      lineSpacing: 1.6,
+    );
 
     return _shell(
       child: pw.Row(
@@ -165,19 +172,8 @@ class PrismTemplate extends ResumeTemplate {
                     ),
                   ),
                 ],
-                if (contact.isNotEmpty) ...[
-                  pw.SizedBox(height: 6),
-                  clampedText(
-                    contact,
-                    maxLines: 2,
-                    style: pw.TextStyle(
-                      font: sans.regular,
-                      fontSize: 8.3,
-                      color: p.muted,
-                      lineSpacing: 1.6,
-                    ),
-                  ),
-                ],
+                pw.SizedBox(height: 6),
+                contactStrip(contact, style: contactStyle),
               ],
             ),
           ),
@@ -471,33 +467,20 @@ class PrismTemplate extends ResumeTemplate {
         child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            pw.Row(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Expanded(
-                  child: clampedText(
-                    pr.name,
-                    style: pw.TextStyle(
-                      font: sans.bold,
-                      fontSize: 10.2,
-                      color: p.ink,
-                    ),
-                  ),
-                ),
-                if (pr.link.trim().isNotEmpty) ...[
-                  pw.SizedBox(width: 8),
-                  pw.Text(
-                    pr.link,
-                    maxLines: 1,
-                    overflow: pw.TextOverflow.clip,
-                    style: pw.TextStyle(
-                      font: sans.regular,
-                      fontSize: 7.8,
-                      color: p.secondary,
-                    ),
-                  ),
-                ],
-              ],
+            titleWithUrl(
+              title: pr.name,
+              titleStyle: pw.TextStyle(
+                font: sans.bold,
+                fontSize: 10.2,
+                color: p.ink,
+              ),
+              url: pr.link,
+              urlStyle: pw.TextStyle(
+                font: sans.regular,
+                fontSize: 7.8,
+                color: p.secondary,
+              ),
+              gap: 8,
             ),
             if (pr.description.trim().isNotEmpty) ...[
               pw.SizedBox(height: 2),

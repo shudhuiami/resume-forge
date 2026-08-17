@@ -337,25 +337,38 @@ class LinenTemplate extends ResumeTemplate {
   }
 
   pw.Widget _project(Project pr, LoadedFamily sans, TemplatePalette p) {
-    final meta = [
-      if (pr.technologies.trim().isNotEmpty)
-        pr.technologies
-            .split(',')
-            .map((t) => t.trim())
-            .where((t) => t.isNotEmpty)
-            .take(5)
-            .join(', '),
-      if (pr.link.trim().isNotEmpty) pr.link.trim(),
-    ].join('   ·   ');
+    // The link is no longer folded into this run: joined behind the technology
+    // list it was the part that ran off the end of the single line and was cut
+    // mid-token (URL rule, item 6). It gets its own line below.
+    final meta = pr.technologies
+        .split(',')
+        .map((t) => t.trim())
+        .where((t) => t.isNotEmpty)
+        .take(5)
+        .join(', ');
 
     return pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 11),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          clampedText(
-            pr.name,
-            style: pw.TextStyle(font: sans.semiBold, fontSize: 9, color: p.ink),
+          // The link rides on the title line rather than taking one of its
+          // own: this design pins a contact block to the page foot and the
+          // body has to stay clear of it.
+          titleWithUrl(
+            title: pr.name,
+            titleStyle: pw.TextStyle(
+              font: sans.semiBold,
+              fontSize: 9,
+              color: p.ink,
+            ),
+            url: pr.link,
+            urlStyle: pw.TextStyle(
+              font: sans.regular,
+              fontSize: 7.6,
+              color: p.muted,
+            ),
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
           ),
           if (pr.description.trim().isNotEmpty) ...[
             pw.SizedBox(height: 2),
@@ -480,11 +493,19 @@ class LinenTemplate extends ResumeTemplate {
       info.email,
       info.phone,
       info.location,
+    ].where((e) => e.trim().isNotEmpty).toList();
+    final links = <String>[
       info.linkedin,
       info.website,
-    ].where((e) => e.trim().isNotEmpty).take(5).toList();
+    ].where((e) => e.trim().isNotEmpty).toList();
 
-    if (contact.isEmpty) return pw.SizedBox();
+    if (contact.isEmpty && links.isEmpty) return pw.SizedBox();
+
+    final itemStyle = pw.TextStyle(
+      font: sans.regular,
+      fontSize: 8,
+      color: p.ink,
+    );
 
     return pw.SizedBox(
       width: _contentW,
@@ -510,15 +531,11 @@ class LinenTemplate extends ResumeTemplate {
               runSpacing: 5,
               children: [
                 for (final line in contact)
-                  pw.Text(
-                    line,
-                    maxLines: 1,
-                    style: pw.TextStyle(
-                      font: sans.regular,
-                      fontSize: 8,
-                      color: p.ink,
-                    ),
-                  ),
+                  pw.Text(line, maxLines: 1, style: itemStyle),
+                // A Wrap child is bounded by the strip, so the URL rule sizes
+                // each link against that rather than being cut mid-token by the
+                // one-line clamp.
+                for (final line in links) urlText(line, style: itemStyle),
               ],
             ),
           ),

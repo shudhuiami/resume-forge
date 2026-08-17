@@ -1,4 +1,4 @@
-# Resivo
+# Resume Studio
 
 A no-signup resume builder. Pick a design, fill in one form, watch a live
 preview, export a print-ready PDF. No accounts, no backend, no network — every
@@ -100,7 +100,14 @@ mobile/
   tool/           build_fonts.py — regenerates the bundled font cuts
 ```
 
-The one rule worth knowing before touching `templates/`: read the hazard notes
-at the top of `lib/templates/template.dart`. Three `dart_pdf` behaviours in
-there each cost a full debugging cycle to find, and all three fail **silently**
-— passing tests over visibly broken output.
+Two things are worth knowing before touching `templates/`, and both live at the
+top of `lib/templates/template.dart`:
+
+- **The hazard notes.** Three `dart_pdf` behaviours that each cost a full
+  debugging cycle to find, and all three fail **silently** — passing tests over
+  visibly broken output.
+- **The URL rule.** How this app draws a URL, in six numbered points: display
+  form, breaking, shortening, and the two layout traps that made links look
+  broken. Use `urlText`, `titleWithUrl` and `contactStrip` rather than passing a
+  link to `pw.Text`. `test/templates/url_rule_test.dart` holds every design in
+  the registry to it.

@@ -248,9 +248,17 @@ class CircuitTemplate extends ResumeTemplate {
       info.email,
       info.phone,
       info.location,
+    ].where((e) => e.trim().isNotEmpty).toList();
+    final links = <String>[
       info.linkedin,
       info.website,
-    ].where((e) => e.trim().isNotEmpty).take(5).toList();
+    ].where((e) => e.trim().isNotEmpty).toList();
+
+    final contactStyle = pw.TextStyle(
+      font: mono.regular,
+      fontSize: 7.8,
+      color: p.secondary,
+    );
 
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -258,19 +266,19 @@ class CircuitTemplate extends ResumeTemplate {
         // Contact lives in the sidebar rather than the header band: stacked one
         // per line it reads as a data block in the monospace track, and it
         // gives the right column enough mass to balance the experience list.
-        if (contact.isNotEmpty) ...[
+        if (contact.isNotEmpty || links.isNotEmpty) ...[
           _sectionTitle('Contact', sans, p),
           for (final line in contact)
             pw.Padding(
               padding: const pw.EdgeInsets.only(bottom: 5),
-              child: clampedText(
-                line,
-                style: pw.TextStyle(
-                  font: mono.regular,
-                  fontSize: 7.8,
-                  color: p.secondary,
-                ),
-              ),
+              child: clampedText(line, style: contactStyle),
+            ),
+          // Monospace is wide: a real profile URL takes two of the sidebar's
+          // ~199pt lines, and must break at a path separator (URL rule).
+          for (final line in links)
+            pw.Padding(
+              padding: const pw.EdgeInsets.only(bottom: 5),
+              child: urlText(line, maxLines: 3, style: contactStyle),
             ),
           pw.SizedBox(height: 18),
         ],
@@ -432,31 +440,20 @@ class CircuitTemplate extends ResumeTemplate {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Expanded(
-                child: clampedText(
-                  pr.name,
-                  style: pw.TextStyle(
-                    font: sans.bold,
-                    fontSize: 10.2,
-                    color: p.ink,
-                  ),
-                ),
-              ),
-              if (pr.link.trim().isNotEmpty) ...[
-                pw.SizedBox(width: 8),
-                clampedText(
-                  pr.link,
-                  style: pw.TextStyle(
-                    font: mono.regular,
-                    fontSize: 7.6,
-                    color: p.primary,
-                  ),
-                ),
-              ],
-            ],
+          titleWithUrl(
+            title: pr.name,
+            titleStyle: pw.TextStyle(
+              font: sans.bold,
+              fontSize: 10.2,
+              color: p.ink,
+            ),
+            url: pr.link,
+            urlStyle: pw.TextStyle(
+              font: mono.regular,
+              fontSize: 7.6,
+              color: p.primary,
+            ),
+            gap: 8,
           ),
           if (pr.description.trim().isNotEmpty) ...[
             pw.SizedBox(height: 2),

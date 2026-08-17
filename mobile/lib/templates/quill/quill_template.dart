@@ -143,13 +143,20 @@ class QuillTemplate extends ResumeTemplate {
     final p = ctx.palette;
     final info = ctx.data.personalInfo;
 
-    final contact = <String>[
-      info.email,
-      info.phone,
-      info.location,
-      info.linkedin,
-      info.website,
-    ].where((e) => e.trim().isNotEmpty).take(5).join('  ·  ');
+    final contact = <(String, bool)>[
+      (info.email, false),
+      (info.phone, false),
+      (info.location, false),
+      (info.linkedin, true),
+      (info.website, true),
+    ];
+
+    final contactStyle = pw.TextStyle(
+      font: serif.regular,
+      fontSize: 8.2,
+      color: p.muted,
+      lineSpacing: 2,
+    );
 
     return pw.SizedBox(
       width: _contentW,
@@ -179,20 +186,16 @@ class QuillTemplate extends ResumeTemplate {
               ),
             ),
           ],
-          if (contact.isNotEmpty) ...[
-            pw.SizedBox(height: 8),
-            clampedText(
-              contact,
-              maxLines: 2,
-              align: pw.TextAlign.center,
-              style: pw.TextStyle(
-                font: serif.regular,
-                fontSize: 8.2,
-                color: p.muted,
-                lineSpacing: 2,
-              ),
-            ),
-          ],
+          pw.SizedBox(height: 8),
+          contactStrip(
+            contact,
+            // One line only: this page is full at the sample content, and a
+            // second contact line costs it the whole competencies section.
+            maxLines: 1,
+            separator: '  ·  ',
+            style: contactStyle,
+            alignment: pw.WrapAlignment.center,
+          ),
           pw.SizedBox(height: 12),
           pw.Container(width: _contentW, height: 1.6, color: p.primary),
           pw.SizedBox(height: 2.6),
@@ -464,25 +467,38 @@ class QuillTemplate extends ResumeTemplate {
   }
 
   pw.Widget _project(Project pr, LoadedFamily serif, TemplatePalette p) {
-    final meta = [
-      if (pr.technologies.trim().isNotEmpty)
-        pr.technologies
-            .split(',')
-            .map((t) => t.trim())
-            .where((t) => t.isNotEmpty)
-            .take(6)
-            .join(', '),
-      if (pr.link.trim().isNotEmpty) pr.link.trim(),
-    ].join('  ·  ');
+    // The link is no longer folded into this run: joined behind the technology
+    // list it was the part that ran off the end of the single line and was cut
+    // mid-token (URL rule, item 6). It gets its own line below.
+    final meta = pr.technologies
+        .split(',')
+        .map((t) => t.trim())
+        .where((t) => t.isNotEmpty)
+        .take(6)
+        .join(', ');
 
     return pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 10),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          clampedText(
-            pr.name,
-            style: pw.TextStyle(font: serif.bold, fontSize: 9.4, color: p.ink),
+          // The link rides on the title line rather than taking one of its
+          // own: this design's page is already full at the sample content, and
+          // a fourteenth line here costs it the whole skills section.
+          titleWithUrl(
+            title: pr.name,
+            titleStyle: pw.TextStyle(
+              font: serif.bold,
+              fontSize: 9.4,
+              color: p.ink,
+            ),
+            url: pr.link,
+            urlStyle: pw.TextStyle(
+              font: serif.regular,
+              fontSize: 8,
+              color: p.primary,
+            ),
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
           ),
           if (pr.description.trim().isNotEmpty)
             clampedText(

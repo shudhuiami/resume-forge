@@ -192,28 +192,36 @@ class OrchidTemplate extends ResumeTemplate {
       info.email,
       info.phone,
       info.location,
+    ].where((e) => e.trim().isNotEmpty).toList();
+    final links = <String>[
       info.linkedin,
       info.website,
     ].where((e) => e.trim().isNotEmpty).toList();
 
+    final contactStyle = pw.TextStyle(
+      font: serif.regular,
+      fontSize: 9,
+      color: p.ink,
+      lineSpacing: 2,
+    );
+
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        if (contact.isNotEmpty) ...[
+        if (contact.isNotEmpty || links.isNotEmpty) ...[
           _sectionLabel('Contact', sans, p),
           ...contact.map(
             (line) => pw.Padding(
               padding: const pw.EdgeInsets.only(bottom: 7),
-              child: clampedText(
-                line,
-                maxLines: 2,
-                style: pw.TextStyle(
-                  font: serif.regular,
-                  fontSize: 9,
-                  color: p.ink,
-                  lineSpacing: 2,
-                ),
-              ),
+              child: clampedText(line, maxLines: 2, style: contactStyle),
+            ),
+          ),
+          // The rail is ~146pt: a real profile URL needs three lines there,
+          // broken at path separators rather than mid-handle (URL rule).
+          ...links.map(
+            (line) => pw.Padding(
+              padding: const pw.EdgeInsets.only(bottom: 7),
+              child: urlText(line, maxLines: 3, style: contactStyle),
             ),
           ),
           pw.SizedBox(height: 20),
@@ -393,9 +401,23 @@ class OrchidTemplate extends ResumeTemplate {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          clampedText(
-            pr.name,
-            style: pw.TextStyle(font: serif.bold, fontSize: 10.8, color: p.ink),
+          // The link was never drawn here at all, so a project URL the user
+          // typed silently never reached the PDF (QA-1). Set in the sans face
+          // the design already reserves for metadata.
+          titleWithUrl(
+            title: pr.name,
+            titleStyle: pw.TextStyle(
+              font: serif.bold,
+              fontSize: 10.8,
+              color: p.ink,
+            ),
+            url: pr.link,
+            urlStyle: pw.TextStyle(
+              font: sans.regular,
+              fontSize: 8,
+              color: p.primary,
+            ),
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
           ),
           if (pr.description.trim().isNotEmpty) ...[
             pw.SizedBox(height: 3),

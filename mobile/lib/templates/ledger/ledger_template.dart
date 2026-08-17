@@ -95,13 +95,20 @@ class LedgerTemplate extends ResumeTemplate {
     final p = ctx.palette;
     final info = ctx.data.personalInfo;
 
-    final contact = <String>[
-      info.email,
-      info.phone,
-      info.location,
-      info.linkedin,
-      info.website,
-    ].where((e) => e.trim().isNotEmpty).join('   |   ');
+    final contact = <(String, bool)>[
+      (info.email, false),
+      (info.phone, false),
+      (info.location, false),
+      (info.linkedin, true),
+      (info.website, true),
+    ];
+
+    final contactStyle = pw.TextStyle(
+      font: mono.regular,
+      fontSize: 7.4,
+      color: p.secondary,
+      lineSpacing: 1.5,
+    );
 
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -126,19 +133,8 @@ class LedgerTemplate extends ResumeTemplate {
         pw.Container(width: double.infinity, height: 1.4, color: p.primary),
         pw.SizedBox(height: 2),
         pw.Container(width: double.infinity, height: 0.5, color: p.primary),
-        if (contact.isNotEmpty) ...[
-          pw.SizedBox(height: 8),
-          clampedText(
-            contact,
-            maxLines: 2,
-            style: pw.TextStyle(
-              font: mono.regular,
-              fontSize: 7.4,
-              color: p.secondary,
-              lineSpacing: 1.5,
-            ),
-          ),
-        ],
+        pw.SizedBox(height: 8),
+        contactStrip(contact, separator: '   |   ', style: contactStyle),
         pw.SizedBox(height: 12),
       ],
     );
@@ -408,31 +404,20 @@ class LedgerTemplate extends ResumeTemplate {
       content: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Row(
+          titleWithUrl(
+            title: pr.name,
+            titleStyle: pw.TextStyle(
+              font: serif.bold,
+              fontSize: 9.8,
+              color: p.ink,
+            ),
+            url: pr.link,
+            urlStyle: pw.TextStyle(
+              font: mono.regular,
+              fontSize: 7.2,
+              color: p.secondary,
+            ),
             crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              pw.Expanded(
-                child: clampedText(
-                  pr.name,
-                  style: pw.TextStyle(
-                    font: serif.bold,
-                    fontSize: 9.8,
-                    color: p.ink,
-                  ),
-                ),
-              ),
-              if (pr.link.trim().isNotEmpty) ...[
-                pw.SizedBox(width: 10),
-                clampedText(
-                  pr.link.trim(),
-                  style: pw.TextStyle(
-                    font: mono.regular,
-                    fontSize: 7.2,
-                    color: p.secondary,
-                  ),
-                ),
-              ],
-            ],
           ),
           if (pr.description.trim().isNotEmpty) ...[
             pw.SizedBox(height: 2),
