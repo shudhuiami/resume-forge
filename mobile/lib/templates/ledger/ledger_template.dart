@@ -455,7 +455,7 @@ class LedgerTemplate extends ResumeTemplate {
     LoadedFamily serif,
     TemplatePalette p,
   ) {
-    final filled = s.level.clamp(0, 5);
+    final filled = skillRating(s);
 
     return pw.Container(
       width: double.infinity,
@@ -470,23 +470,30 @@ class LedgerTemplate extends ResumeTemplate {
             width: _gutter,
             // Level marks are drawn boxes rather than glyphs: nothing here
             // depends on the mono face shipping a bullet or block character.
-            child: pw.Row(
-              children: List<pw.Widget>.generate(
-                5,
-                (i) => pw.Container(
-                  width: 9,
-                  height: 3,
-                  margin: const pw.EdgeInsets.only(right: 3),
-                  color: i < filled
-                      ? p.primary
-                      : const PdfColor.fromInt(0xFFE5E7EB),
-                ),
-              ),
-            ),
+            //
+            // Skills rule item 5: an unrated skill leaves the gutter empty
+            // rather than drawing five grey marks. Zero-of-five is a rating,
+            // and it is not the one the user gave; the gutter already stands
+            // empty on other rows in this design, so nothing looks broken.
+            child: filled == null
+                ? pw.SizedBox()
+                : pw.Row(
+                    children: List<pw.Widget>.generate(
+                      5,
+                      (i) => pw.Container(
+                        width: 9,
+                        height: 3,
+                        margin: const pw.EdgeInsets.only(right: 3),
+                        color: i < filled
+                            ? p.primary
+                            : const PdfColor.fromInt(0xFFE5E7EB),
+                      ),
+                    ),
+                  ),
           ),
           pw.SizedBox(width: _gutterGap),
           pw.Expanded(
-            child: clampedText(
+            child: markedText(
               s.name,
               style: pw.TextStyle(
                 font: serif.regular,

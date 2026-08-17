@@ -145,21 +145,38 @@ class TerminalTemplate extends ResumeTemplate {
         pw.SizedBox(height: 18),
         _summary(info.summary, sans, p),
       ],
-      if (experiences.isNotEmpty) ...[
-        pw.SizedBox(height: 22),
-        _sectionHeader('experience', mono, p),
-        ...experiences.map((e) => _experience(e, mono, sans, p)),
-      ],
-      if (projects.isNotEmpty) ...[
-        pw.SizedBox(height: 16),
-        _sectionHeader('projects', mono, p),
-        ...projects.map((pr) => _project(pr, mono, sans, p)),
-      ],
-      if (skills.isNotEmpty) ...[
-        pw.SizedBox(height: 16),
-        _sectionHeader('skills', mono, p),
-        pw.SizedBox(width: _contentW, child: _skillCloud(skills, mono, p)),
-      ],
+      // Skills rule item 1. Experience and projects are the two blocks that
+      // grow without limit, and they sat above skills as plain children — so
+      // once they filled the box, dart_pdf stopped laying out and everything
+      // below them, skills included, was never painted. As a loose Flexible
+      // they are measured last and take only what is left over, which makes
+      // them the section that trims instead of the section below them.
+      // `loose`, not Expanded: a tight fit would drive the trailing blocks to
+      // the page foot and leave a hole on a short resume.
+      if (experiences.isNotEmpty || projects.isNotEmpty)
+        pw.Flexible(
+          fit: pw.FlexFit.loose,
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            // Without this the inner Column takes MainAxisSize.max, sizes
+            // itself to the whole leftover budget rather than to its content,
+            // and drives `~/skills` down onto the page foot.
+            mainAxisSize: pw.MainAxisSize.min,
+            children: [
+              if (experiences.isNotEmpty) ...[
+                pw.SizedBox(height: 22),
+                _sectionHeader('experience', mono, p),
+                ...experiences.map((e) => _experience(e, mono, sans, p)),
+              ],
+              if (projects.isNotEmpty) ...[
+                pw.SizedBox(height: 16),
+                _sectionHeader('projects', mono, p),
+                ...projects.map((pr) => _project(pr, mono, sans, p)),
+              ],
+            ],
+          ),
+        ),
+      if (skills.isNotEmpty) _skillsBlock(skills, mono, p),
       if (education.isNotEmpty || customSections.isNotEmpty) ...[
         pw.SizedBox(height: 22),
         pw.SizedBox(
@@ -576,6 +593,32 @@ class TerminalTemplate extends ResumeTemplate {
     );
   }
 
+  /// `~/skills` and its token cloud, as one indivisible widget.
+  ///
+  /// Skills rule item 2. The header and the cloud used to be two siblings of
+  /// the body Column. The cloud is one `pw.Wrap` and cannot be split, so when
+  /// the page ran short dart_pdf dropped it whole and kept the header — leaving
+  /// `~/skills` sitting over an empty band above `$ exit`, a page advertising a
+  /// section it did not contain. Bound together they can only stand or fall
+  /// together.
+  pw.Widget _skillsBlock(
+    List<Skill> skills,
+    LoadedFamily mono,
+    TemplatePalette p,
+  ) {
+    return pw.SizedBox(
+      width: _contentW,
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.SizedBox(height: 16),
+          _sectionHeader('skills', mono, p),
+          _skillCloud(skills, mono, p),
+        ],
+      ),
+    );
+  }
+
   /// Skills as shell-style bracketed tokens.
   pw.Widget _skillCloud(
     List<Skill> skills,
@@ -596,9 +639,11 @@ class TerminalTemplate extends ResumeTemplate {
               color: _panel,
               border: pw.Border.all(color: _rule, width: 0.7),
             ),
-            child: pw.Text(
+            // Skills rule item 3. Monospace is wide: a name long enough to
+            // outrun the content width would otherwise stretch its token past
+            // the right margin, since a Wrap child is free to be that wide.
+            child: markedText(
               s.name.toLowerCase(),
-              maxLines: 1,
               style: pw.TextStyle(
                 font: mono.regular,
                 fontSize: 8.2,

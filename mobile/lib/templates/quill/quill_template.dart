@@ -71,7 +71,10 @@ class QuillTemplate extends ResumeTemplate {
         .toList();
     final experiences = data.experiences.take(_maxExperience).toList();
     final projects = data.projects.take(_maxProjects).toList();
-    final skills = data.skills.take(_maxSkills).toList();
+    // Not capped here: [skillRun] applies _maxSkills itself, so the names the
+    // cap removes are still counted in its `+N more` marker rather than
+    // disappearing before it can see them.
+    final skills = data.skills.map((s) => s.name).toList();
     final summary = data.personalInfo.summary.trim();
 
     return pw.SizedBox(
@@ -99,31 +102,89 @@ class QuillTemplate extends ResumeTemplate {
                 ),
               ),
             ],
-            if (education.isNotEmpty) ...[
-              pw.SizedBox(height: 20),
-              _label('Education', serif, p),
-              ...education.map((e) => _education(e, serif, p)),
-            ],
-            for (final section in customSections) ...[
-              pw.SizedBox(height: 18),
-              _customSection(section, serif, p),
-            ],
-            if (experiences.isNotEmpty) ...[
-              pw.SizedBox(height: 18),
-              _label('Appointments', serif, p),
-              ...experiences.map((e) => _experience(e, serif, p)),
-            ],
-            if (projects.isNotEmpty) ...[
-              pw.SizedBox(height: 14),
-              _label('Selected Work', serif, p),
-              ...projects.map((pr) => _project(pr, serif, p)),
-            ],
+            // Skills rule item 1. Everything from education to the last project
+            // grows with the resume, and competencies sat underneath it all as
+            // the final plain child of a page-height Column — so a fourth
+            // appointment was enough for dart_pdf to stop laying out before it
+            // and drop the entire section, on a page that still had visible
+            // white space. As a loose Flexible this block is measured after the
+            // competencies line and takes only the space left over, so it is
+            // the one that gives up an entry instead.
+            if (education.isNotEmpty ||
+                customSections.isNotEmpty ||
+                experiences.isNotEmpty ||
+                projects.isNotEmpty)
+              pw.Flexible(
+                fit: pw.FlexFit.loose,
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  // Without this the inner Column takes MainAxisSize.max, sizes
+                  // itself to the whole leftover budget rather than to its
+                  // content, and drives Competencies onto the page foot.
+                  mainAxisSize: pw.MainAxisSize.min,
+                  children: [
+                    // Skills rule item 2: each label travels with its first
+                    // entry. As plain siblings the truncation could fall
+                    // between them, and it did — the page came out with a
+                    // "Selected Work" rule over an empty band.
+                    if (education.isNotEmpty)
+                      ...headedSection(
+                        heading: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          mainAxisSize: pw.MainAxisSize.min,
+                          children: [
+                            pw.SizedBox(height: 20),
+                            _label('Education', serif, p),
+                          ],
+                        ),
+                        entries: education
+                            .map((e) => _education(e, serif, p))
+                            .toList(),
+                      ),
+                    for (final section in customSections) ...[
+                      pw.SizedBox(height: 18),
+                      _customSection(section, serif, p),
+                    ],
+                    if (experiences.isNotEmpty)
+                      ...headedSection(
+                        heading: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          mainAxisSize: pw.MainAxisSize.min,
+                          children: [
+                            pw.SizedBox(height: 18),
+                            _label('Appointments', serif, p),
+                          ],
+                        ),
+                        entries: experiences
+                            .map((e) => _experience(e, serif, p))
+                            .toList(),
+                      ),
+                    if (projects.isNotEmpty)
+                      ...headedSection(
+                        heading: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          mainAxisSize: pw.MainAxisSize.min,
+                          children: [
+                            pw.SizedBox(height: 14),
+                            _label('Selected Work', serif, p),
+                          ],
+                        ),
+                        entries: projects
+                            .map((pr) => _project(pr, serif, p))
+                            .toList(),
+                      ),
+                  ],
+                ),
+              ),
             if (skills.isNotEmpty) ...[
               pw.SizedBox(height: 12),
               _label('Competencies', serif, p),
-              clampedText(
-                skills.map((s) => s.name).join(' · '),
+              // Skills rule item 4: names that do not fit the three lines are
+              // counted rather than silently swallowed by the clamp.
+              skillRun(
+                skills,
                 maxLines: 3,
+                maxNames: _maxSkills,
                 style: pw.TextStyle(
                   font: serif.regular,
                   fontSize: 9.2,

@@ -302,9 +302,10 @@ class CircuitTemplate extends ResumeTemplate {
                       width: 0.7,
                     ),
                   ),
-                  child: pw.Text(
+                  // Skills rule item 3. The Wrap bounds this child to the rail,
+                  // so a name wider than it is marked rather than stopped.
+                  child: markedText(
                     s.name,
-                    maxLines: 1,
                     style: pw.TextStyle(
                       font: mono.regular,
                       fontSize: 7.8,

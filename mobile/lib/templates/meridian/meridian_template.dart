@@ -221,15 +221,19 @@ class MeridianTemplate extends ResumeTemplate {
   pw.Widget _skillBar(Skill s, LoadedFamily sans, TemplatePalette p) {
     // No FractionallySizedBox in dart_pdf: the fill is a flex split so it stays
     // correct at any sidebar width.
-    final filled = s.level.clamp(0, 5);
-    final empty = 5 - filled;
+    final filled = skillRating(s);
+    final empty = filled == null ? 0 : 5 - filled;
 
     return pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 8),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          clampedText(
+          // This rail is 148pt: the narrowest place a skill name is set
+          // anywhere in the catalog, and the one that used to cut a long name
+          // dead at 29 characters. Skills rule item 3 — the cut is marked now,
+          // and the width stays the design's own.
+          markedText(
             s.name,
             style: pw.TextStyle(
               font: sans.regular,
@@ -237,21 +241,23 @@ class MeridianTemplate extends ResumeTemplate {
               color: _onSlate,
             ),
           ),
-          pw.SizedBox(height: 3.5),
-          pw.Container(
-            height: 3,
-            color: _slateRule,
-            child: pw.Row(
-              children: [
-                if (filled > 0)
+          // Skills rule item 5: no rating, no bar.
+          if (filled != null) ...[
+            pw.SizedBox(height: 3.5),
+            pw.Container(
+              height: 3,
+              color: _slateRule,
+              child: pw.Row(
+                children: [
                   pw.Expanded(
                     flex: filled,
                     child: pw.Container(color: p.accent),
                   ),
-                if (empty > 0) pw.Expanded(flex: empty, child: pw.SizedBox()),
-              ],
+                  if (empty > 0) pw.Expanded(flex: empty, child: pw.SizedBox()),
+                ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );

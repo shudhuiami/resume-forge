@@ -310,7 +310,9 @@ class OrchidTemplate extends ResumeTemplate {
           pw.Container(width: 3, height: 3, color: p.primary),
           pw.SizedBox(width: 6),
           pw.Expanded(
-            child: clampedText(
+            // Two lines is this rail's own budget; skills rule item 3 only
+            // requires that whatever it cannot hold is marked.
+            child: markedText(
               s.name,
               maxLines: 2,
               style: pw.TextStyle(

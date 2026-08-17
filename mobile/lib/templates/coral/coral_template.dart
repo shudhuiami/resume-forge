@@ -376,10 +376,11 @@ class CoralTemplate extends ResumeTemplate {
         borderRadius: pillRadius(17),
         border: pw.Border.all(color: _hairline, width: 0.7),
       ),
-      child: pw.Text(
+      // Skills rule item 3: a name too long for the column is marked, not cut.
+      // The Wrap bounds this child to the column, so no explicit width is
+      // needed here.
+      child: markedText(
         label,
-        maxLines: 1,
-        overflow: pw.TextOverflow.clip,
         style: pw.TextStyle(font: sans.semiBold, fontSize: 8.2, color: p.ink),
       ),
     );

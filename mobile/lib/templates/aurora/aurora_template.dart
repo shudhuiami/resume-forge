@@ -53,6 +53,13 @@ class AuroraTemplate extends ResumeTemplate {
   static const _photoSize = 92.0;
   static const _pagePadding = 32.0;
 
+  /// Sidebar density. This was the one skills call site in the catalog with no
+  /// cap, and an uncapped list is not a generous design — it is a list that
+  /// takes the whole rail: at 24 skills the meters ran to the foot of the page
+  /// and dart_pdf deleted the Education block underneath them outright. Ten
+  /// matches the rail's other lists and leaves education its space.
+  static const _maxSkills = 10;
+
   @override
   pw.Widget build(TemplateContext ctx) {
     final sans = ctx.family(FontFamily.sans);
@@ -237,7 +244,7 @@ class AuroraTemplate extends ResumeTemplate {
         ],
         if (data.skills.isNotEmpty) ...[
           _sectionTitle('Skills', sans, p),
-          ...data.skills.map((s) => _skillMeter(s, sans, p)),
+          ...data.skills.take(_maxSkills).map((s) => _skillMeter(s, sans, p)),
           pw.SizedBox(height: 14),
         ],
         if (data.education.isNotEmpty) ...[
@@ -363,15 +370,15 @@ class AuroraTemplate extends ResumeTemplate {
     // dart_pdf has no FractionallySizedBox, so the fill is expressed as flex
     // against the remainder — which also keeps the meter correct at any
     // sidebar width rather than depending on a measured pixel value.
-    final filled = s.level.clamp(0, 5);
-    final empty = 5 - filled;
+    final filled = skillRating(s);
+    final empty = filled == null ? 0 : 5 - filled;
 
     return pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 7),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          clampedText(
+          markedText(
             s.name,
             style: pw.TextStyle(
               font: sans.regular,
@@ -379,16 +386,18 @@ class AuroraTemplate extends ResumeTemplate {
               color: p.ink,
             ),
           ),
-          pw.SizedBox(height: 3),
-          pw.Container(
-            height: 4,
-            decoration: pw.BoxDecoration(
-              color: const PdfColor.fromInt(0xFFEDEAF7),
-              borderRadius: pw.BorderRadius.circular(2),
-            ),
-            child: pw.Row(
-              children: [
-                if (filled > 0)
+          // Skills rule item 5: an unrated skill gets no track. An empty one
+          // would read as a failed render, or as a rating the user never gave.
+          if (filled != null) ...[
+            pw.SizedBox(height: 3),
+            pw.Container(
+              height: 4,
+              decoration: pw.BoxDecoration(
+                color: const PdfColor.fromInt(0xFFEDEAF7),
+                borderRadius: pw.BorderRadius.circular(2),
+              ),
+              child: pw.Row(
+                children: [
                   pw.Expanded(
                     flex: filled,
                     child: pw.Container(
@@ -400,10 +409,11 @@ class AuroraTemplate extends ResumeTemplate {
                       ),
                     ),
                   ),
-                if (empty > 0) pw.Expanded(flex: empty, child: pw.SizedBox()),
-              ],
+                  if (empty > 0) pw.Expanded(flex: empty, child: pw.SizedBox()),
+                ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );

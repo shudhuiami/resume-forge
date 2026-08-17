@@ -76,7 +76,9 @@ class LinenTemplate extends ResumeTemplate {
     final experiences = data.experiences.take(_maxExperience).toList();
     final projects = data.projects.take(_maxProjects).toList();
     final education = data.education.take(_maxEducation).toList();
-    final skills = data.skills.take(_maxSkills).toList();
+    // Not capped here: [skillRun] applies _maxSkills itself, so the names the
+    // cap removes are still counted in its `+N more` marker.
+    final skills = data.skills.map((s) => s.name).toList();
     final customSections = data.customSections
         .take(_maxCustomSections)
         .toList();
@@ -124,55 +126,84 @@ class LinenTemplate extends ResumeTemplate {
                           ),
                         ),
                       ),
-                    if (experiences.isNotEmpty)
-                      _entry(
-                        'Experience',
-                        sans,
-                        p,
-                        pw.Column(
+                    // Skills rule item 1. These four blocks are the ones that
+                    // grow with the resume, and Skills sat below them as the
+                    // last plain child of a box capped short of the footer — so
+                    // a fourth role was enough for dart_pdf to stop laying out
+                    // before it and delete the section outright, while the page
+                    // still showed white space above the pinned contact block.
+                    // A loose Flexible is measured after Skills and takes only
+                    // what is left, so it gives up an entry instead.
+                    if (experiences.isNotEmpty ||
+                        projects.isNotEmpty ||
+                        education.isNotEmpty ||
+                        customSections.isNotEmpty)
+                      pw.Flexible(
+                        fit: pw.FlexFit.loose,
+                        child: pw.Column(
                           crossAxisAlignment: pw.CrossAxisAlignment.start,
-                          children: experiences
-                              .map((e) => _experience(e, sans, p))
-                              .toList(),
-                        ),
-                      ),
-                    if (projects.isNotEmpty)
-                      _entry(
-                        'Selected work',
-                        sans,
-                        p,
-                        pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.start,
-                          children: projects
-                              .map((pr) => _project(pr, sans, p))
-                              .toList(),
-                        ),
-                      ),
-                    if (education.isNotEmpty)
-                      _entry(
-                        'Education',
-                        sans,
-                        p,
-                        pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.start,
-                          children: education
-                              .map((e) => _education(e, sans, p))
-                              .toList(),
-                        ),
-                      ),
-                    for (final section in customSections)
-                      _entry(
-                        section.sectionTitle.isEmpty
-                            ? 'Also'
-                            : section.sectionTitle,
-                        sans,
-                        p,
-                        pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.start,
-                          children: section.items
-                              .take(_maxCustomItems)
-                              .map((i) => _customItem(i, sans, p))
-                              .toList(),
+                          // Without this the inner Column takes
+                          // MainAxisSize.max, sizes itself to the whole
+                          // leftover budget rather than to its content, and
+                          // drives Skills down onto the footer reserve.
+                          mainAxisSize: pw.MainAxisSize.min,
+                          children: [
+                            if (experiences.isNotEmpty)
+                              _entry(
+                                'Experience',
+                                sans,
+                                p,
+                                pw.Column(
+                                  crossAxisAlignment:
+                                      pw.CrossAxisAlignment.start,
+                                  children: experiences
+                                      .map((e) => _experience(e, sans, p))
+                                      .toList(),
+                                ),
+                              ),
+                            if (projects.isNotEmpty)
+                              _entry(
+                                'Selected work',
+                                sans,
+                                p,
+                                pw.Column(
+                                  crossAxisAlignment:
+                                      pw.CrossAxisAlignment.start,
+                                  children: projects
+                                      .map((pr) => _project(pr, sans, p))
+                                      .toList(),
+                                ),
+                              ),
+                            if (education.isNotEmpty)
+                              _entry(
+                                'Education',
+                                sans,
+                                p,
+                                pw.Column(
+                                  crossAxisAlignment:
+                                      pw.CrossAxisAlignment.start,
+                                  children: education
+                                      .map((e) => _education(e, sans, p))
+                                      .toList(),
+                                ),
+                              ),
+                            for (final section in customSections)
+                              _entry(
+                                section.sectionTitle.isEmpty
+                                    ? 'Also'
+                                    : section.sectionTitle,
+                                sans,
+                                p,
+                                pw.Column(
+                                  crossAxisAlignment:
+                                      pw.CrossAxisAlignment.start,
+                                  children: section.items
+                                      .take(_maxCustomItems)
+                                      .map((i) => _customItem(i, sans, p))
+                                      .toList(),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     if (skills.isNotEmpty)
@@ -180,9 +211,13 @@ class LinenTemplate extends ResumeTemplate {
                         'Skills',
                         sans,
                         p,
-                        clampedText(
-                          skills.map((s) => s.name).join('   ·   '),
+                        // Skills rule item 4: names the three-line budget
+                        // cannot hold are counted, not swallowed.
+                        skillRun(
+                          skills,
                           maxLines: 3,
+                          maxNames: _maxSkills,
+                          separator: '   ·   ',
                           style: pw.TextStyle(
                             font: sans.regular,
                             fontSize: 8.6,

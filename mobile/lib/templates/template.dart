@@ -575,6 +575,340 @@ String _elideUrl(String s, double limit, double Function(String) width) {
   return fits > 0 ? '${s.substring(0, fits)}…' : '…';
 }
 
+// ---------------------------------------------------------------------------
+// THE SKILLS RULE
+//
+// Skills is the section this catalog has lost most often, and every loss was
+// silent. Three separate failures shipped: Quill and Linen deleted the whole
+// section once a resume reached four roles; Terminal drew its `~/skills`
+// heading over an empty band, advertising a section it did not contain; and
+// eight of the thirteen designs cut a long name off mid-phrase with no mark,
+// keeping anywhere from 29 to 62 characters depending on which design the user
+// happened to pick. The rule exists so none of the three can come back.
+//
+// 1. SKILLS IS NEVER THE LAST NON-FLEX CHILD OF A HEIGHT-BOUNDED COLUMN.
+//    See the ENGINE HAZARD note above: a `pw.Column` stops laying out at the
+//    first child that does not fit and paints nothing from there on. Last
+//    position is therefore the first to be deleted. Where a design puts skills
+//    at the foot of the page, the *growing* content above it — experience,
+//    projects, custom sections — goes in a `pw.Flexible(fit: FlexFit.loose)`,
+//    which is measured last and takes only the space that is left. The trailing
+//    block is then a plain child again, measured first, and cannot be evicted.
+//    `FlexFit.loose` and not `Expanded`: a tight fit would pin the block to the
+//    page foot and open a gap on a short resume.
+//
+// 2. A HEADING AND ITS SKILLS ARE ONE WIDGET. Two sibling children can be split
+//    by the same truncation, which is how Terminal ended up with a labelled
+//    empty band. A heading over nothing is worse than no section at all: it
+//    tells the reader something was lost without saying what. Build the heading
+//    and the content as a single indivisible child so they stand or fall
+//    together.
+//
+// 3. A NAME IS DRAWN IN FULL, OR SHORTENED WITH A VISIBLE `…`. Never cut
+//    without a mark. There is deliberately **no catalog-wide character budget**
+//    for a skill name: Meridian's slate rail is 148 pt and Ledger's row is
+//    460 pt, and one number cannot be honest about both — it would either waste
+//    the wide designs or truncate the narrow ones twice over. What is shared is
+//    the *behaviour*, exactly as it is for a URL (rule item 3 above): how many
+//    characters fit is the design's business, that the reader can see something
+//    was removed is the catalog's. [markedText] measures with the real font and
+//    decides the break itself. It is the counterpart to [clampedText] — same
+//    job, except the reader can tell it happened.
+//
+// 4. A CONTINUOUS RUN SAYS HOW MANY NAMES IT DROPPED. Quill and Linen set
+//    skills as one flowing line of names rather than as discrete chips. A name
+//    lost off the end of that run leaves no gap and no mark, so [skillRun]
+//    closes with `+N more` instead. Chip and meter designs are not given this
+//    marker: they enumerate discrete items, and their `take(n)` cap is a
+//    declared density decision that a reader can see the shape of. That is a
+//    judgement, not an oversight — revisit it if the caps ever start hiding
+//    more than they show.
+//
+// 5. LEVEL 0 MEANS "NOT RATED", NOT "RATED ZERO". The editor's own slider
+//    labels it "None". Four designs draw a 0–5 meter, and drawing that meter
+//    empty is a lie twice over: it reports a rating the user never gave, and an
+//    entirely unfilled track is indistinguishable from one that failed to
+//    render. [skillRating] returns null for level 0 and those designs draw the
+//    name alone — which is exactly what the six designs that ignore `level`
+//    already do, so it is a shape the catalog is already consistent about.
+//
+// `test/templates/skills_test.dart` holds every design in the registry to items
+// 1, 2, 3 and 5, so a template added later cannot quietly opt out.
+// ---------------------------------------------------------------------------
+
+/// A skill's rating on the 0–5 scale, or null when the user did not give one.
+///
+/// See the skills rule, item 5. Out-of-range values are clamped rather than
+/// rejected: `level` comes from stored JSON and a bad value must cost the
+/// meter, not the render.
+int? skillRating(Skill skill) {
+  final level = skill.level;
+  if (level <= 0) return null;
+  return level > 5 ? 5 : level;
+}
+
+/// The mark a design uses for skills it did not draw. See the rule, item 4.
+String skillsHiddenLabel(int hidden) => '+$hidden more';
+
+/// A section heading and its entries, laid out so the heading can never be left
+/// standing alone.
+///
+/// Skills rule item 2, generalised. A `pw.Column` stops laying out at the first
+/// child that does not fit, so a heading and its entries as sibling children
+/// can be split exactly between them — which is how Terminal ended up drawing
+/// `~/skills` over an empty band. Binding the heading to the *first* entry
+/// makes that split impossible, while leaving every later entry a separate
+/// child so the section still gives up one row at a time rather than
+/// disappearing whole.
+///
+/// Returns children to be spread into the parent Column, not a single widget:
+/// grouping the entries too would trade an orphan heading for an all-or-nothing
+/// section, which is the worse of the two.
+List<pw.Widget> headedSection({
+  required pw.Widget heading,
+  required List<pw.Widget> entries,
+}) {
+  if (entries.isEmpty) return const <pw.Widget>[];
+  return <pw.Widget>[
+    pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      mainAxisSize: pw.MainAxisSize.min,
+      children: [heading, entries.first],
+    ),
+    ...entries.skip(1),
+  ];
+}
+
+/// Text that is shortened with a visible `…` rather than cut in silence.
+///
+/// The counterpart to [clampedText], and what the skills rule's item 3 requires
+/// for a skill name. Use it for any short user-supplied label whose loss the
+/// reader would otherwise have no way to notice — a skill, a technology tag.
+/// Prose that already runs to several lines does not need it: a paragraph that
+/// stops reads as a paragraph that stops, and an ellipsis on every clipped
+/// summary would be noise.
+///
+/// [maxWidth] is required wherever this sits in a `pw.Row`, whose non-flex
+/// children are laid out unbounded; in a `pw.Column` or a `pw.Wrap` the
+/// incoming constraint already bounds it and [maxWidth] can be omitted.
+pw.Widget markedText(
+  String name, {
+  required pw.TextStyle style,
+  int maxLines = 1,
+  double? maxWidth,
+  pw.TextAlign? align,
+}) {
+  final trimmed = name.trim();
+  if (trimmed.isEmpty) return pw.SizedBox();
+
+  final text = pw.LayoutBuilder(
+    builder: (context, constraints) {
+      var limit = maxWidth ?? double.infinity;
+      if (constraints != null && constraints.hasBoundedWidth) {
+        limit = math.min(limit, constraints.maxWidth);
+      }
+      if (!limit.isFinite || style.font == null) {
+        return clampedText(
+          trimmed,
+          style: style,
+          maxLines: maxLines,
+          align: align,
+        );
+      }
+
+      return pw.Text(
+        fitTextLines(
+          trimmed,
+          limit: limit,
+          maxLines: maxLines,
+          width: _measurer(style, context),
+        ).join('\n'),
+        style: style,
+        // The breaks are already decided and baked into the string; letting the
+        // engine wrap again would reintroduce the unmarked cut this exists to
+        // prevent.
+        softWrap: false,
+        maxLines: maxLines,
+        overflow: pw.TextOverflow.clip,
+        textAlign: align,
+      );
+    },
+  );
+
+  if (maxWidth == null) return text;
+  return pw.ConstrainedBox(
+    constraints: pw.BoxConstraints(maxWidth: maxWidth),
+    child: text,
+  );
+}
+
+/// Skill names as one continuous separated run, closed by `+N more` when some
+/// of them do not fit. See the skills rule, item 4.
+///
+/// Names are dropped whole. A run that ended mid-name would read as a typo
+/// rather than as a truncation, which is the failure this replaces.
+///
+/// [maxNames] is the design's own density cap. Names past it are not drawn but
+/// are still counted in the marker, because to the reader there is no
+/// difference between a name the cap removed and one the last line could not
+/// hold.
+pw.Widget skillRun(
+  List<String> names, {
+  required pw.TextStyle style,
+  int maxLines = 3,
+  int? maxNames,
+  String separator = ' · ',
+  double? maxWidth,
+}) {
+  final present = names
+      .map((n) => n.trim())
+      .where((n) => n.isNotEmpty)
+      .toList(growable: false);
+  if (present.isEmpty) return pw.SizedBox();
+
+  final capped = maxNames == null || maxNames >= present.length
+      ? present
+      : present.sublist(0, math.max(0, maxNames));
+
+  String runOf(int keep) {
+    final head = capped.take(keep).join(separator);
+    final hidden = present.length - keep;
+    if (hidden <= 0) return head;
+    final tail = skillsHiddenLabel(hidden);
+    return head.isEmpty ? tail : '$head$separator$tail';
+  }
+
+  return pw.LayoutBuilder(
+    builder: (context, constraints) {
+      var limit = maxWidth ?? double.infinity;
+      if (constraints != null && constraints.hasBoundedWidth) {
+        limit = math.min(limit, constraints.maxWidth);
+      }
+
+      pw.Widget draw(String run) => pw.Text(
+        fitTextLines(
+          run,
+          limit: limit,
+          maxLines: maxLines,
+          width: _measurer(style, context),
+        ).join('\n'),
+        style: style,
+        softWrap: false,
+        maxLines: maxLines,
+        overflow: pw.TextOverflow.clip,
+      );
+
+      if (!limit.isFinite || style.font == null) {
+        return clampedText(runOf(capped.length), style: style, maxLines: 1);
+      }
+
+      final width = _measurer(style, context);
+      for (var keep = capped.length; keep > 0; keep--) {
+        if (_lineCount(runOf(keep), limit, width) <= maxLines) {
+          return draw(runOf(keep));
+        }
+      }
+      // Not even one name and the marker fit. The marker alone is still true,
+      // and it is the one thing on the page that says content is missing.
+      return draw(runOf(0));
+    },
+  );
+}
+
+/// Lays [text] out into at most [maxLines] lines no wider than [limit].
+///
+/// Public so the skills rule's item 3 can be tested against a known measure
+/// rather than only through a rendered page — the same reason [fitUrlLines] is.
+///
+/// Guarantees, for any [limit] > 0 and [maxLines] >= 1:
+/// - at most [maxLines] lines are returned;
+/// - every line measures at most [limit], unless a single word cannot be
+///   broken small enough, in which case one character is taken;
+/// - breaks fall on whitespace unless one word is itself wider than [limit];
+/// - if content had to be dropped, the last line ends with `…`.
+List<String> fitTextLines(
+  String text, {
+  required double limit,
+  required int maxLines,
+  required double Function(String) width,
+}) {
+  final trimmed = text.trim();
+  if (trimmed.isEmpty) return const <String>[];
+  if (maxLines < 1 || !limit.isFinite || limit <= 0) return <String>[trimmed];
+  if (width(trimmed) <= limit) return <String>[trimmed];
+
+  // Each word carries the whitespace that follows it, so the run's own spacing
+  // survives being taken apart and put back together. Splitting on `\s+` and
+  // rejoining with one space would silently retype Linen's wide `   ·   `
+  // skills separator as a narrow one — a typographic change smuggled in by a
+  // line breaker, which is not its job.
+  final words = RegExp(
+    r'\S+\s*',
+  ).allMatches(trimmed).map((m) => m[0]!).toList();
+
+  final lines = <String>[];
+  var current = '';
+  var i = 0;
+
+  while (i < words.length) {
+    // The last line the caller allows: everything still unplaced has to go on
+    // it, so this is the only place a `…` is ever added.
+    if (lines.length == maxLines - 1) {
+      final rest = (current + words.sublist(i).join()).trimRight();
+      lines.add(_elideText(rest, limit, width));
+      return lines;
+    }
+
+    final candidate = current + words[i];
+    // Trailing space costs nothing at the end of a line, so it is not measured.
+    if (width(candidate.trimRight()) <= limit) {
+      current = candidate;
+      i++;
+      continue;
+    }
+    if (current.isNotEmpty) {
+      lines.add(current.trimRight());
+      current = '';
+      continue;
+    }
+    // One word wider than the whole line. There is no whitespace to break on,
+    // so it is character-broken — the same last resort the URL rule takes.
+    final word = words[i].trimRight();
+    final fits = _longestPrefix(
+      word.length,
+      (n) => width(word.substring(0, n)) <= limit,
+    );
+    final take = fits < 1 ? 1 : fits;
+    lines.add(word.substring(0, take));
+    words[i] = words[i].substring(take);
+  }
+  final tail = current.trimRight();
+  if (tail.isNotEmpty) lines.add(tail);
+  return lines;
+}
+
+/// Lines [text] needs at [limit] with no maximum — i.e. with nothing dropped.
+int _lineCount(String text, double limit, double Function(String) width) =>
+    fitTextLines(
+      text,
+      limit: limit,
+      // Large enough that the eliding branch is unreachable, so the result is
+      // the true cost of the string rather than a clamped one.
+      maxLines: 1 << 30,
+      width: width,
+    ).length;
+
+/// Shortens [s] to one line of at most [limit], marked with `…`.
+String _elideText(String s, double limit, double Function(String) width) {
+  if (width(s) <= limit) return s;
+  final fits = _longestPrefix(
+    s.length,
+    (n) => width('${s.substring(0, n).trimRight()}…') <= limit,
+  );
+  if (fits < 1) return '…';
+  return '${s.substring(0, fits).trimRight()}…';
+}
+
 /// Formats a date range, collapsing empties rather than emitting stray dashes.
 String formatRange(String start, String end, {bool current = false}) {
   final e = current ? 'Present' : end.trim();

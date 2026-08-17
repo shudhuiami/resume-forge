@@ -461,18 +461,38 @@ class BeaconTemplate extends ResumeTemplate {
   }
 
   pw.Widget _skillItem(Skill s, LoadedFamily sans, TemplatePalette p) {
-    return pw.Row(
-      mainAxisSize: pw.MainAxisSize.min,
-      crossAxisAlignment: pw.CrossAxisAlignment.center,
-      children: [
-        pw.Container(width: 3.5, height: 3.5, color: p.secondary),
-        pw.SizedBox(width: 5),
-        pw.Text(
-          s.name,
-          maxLines: 1,
-          style: pw.TextStyle(font: sans.regular, fontSize: 9.2, color: p.ink),
-        ),
-      ],
+    const bullet = 3.5;
+    const gap = 5.0;
+
+    // The name is a non-flex child of a Row, and dart_pdf lays those out with
+    // *unbounded* width — so before this it sized itself to its full natural
+    // length and a long enough name would paint past the right margin, off the
+    // sheet. The Wrap above does bound this widget, so the width is read here
+    // and handed down (skills rule item 3, same hazard as URL rule item 5).
+    return pw.LayoutBuilder(
+      builder: (context, constraints) {
+        final available = constraints != null && constraints.hasBoundedWidth
+            ? constraints.maxWidth - bullet - gap
+            : null;
+
+        return pw.Row(
+          mainAxisSize: pw.MainAxisSize.min,
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            pw.Container(width: bullet, height: bullet, color: p.secondary),
+            pw.SizedBox(width: gap),
+            markedText(
+              s.name,
+              maxWidth: available,
+              style: pw.TextStyle(
+                font: sans.regular,
+                fontSize: 9.2,
+                color: p.ink,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 

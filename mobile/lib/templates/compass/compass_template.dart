@@ -338,9 +338,11 @@ class CompassTemplate extends ResumeTemplate {
         borderRadius: pillRadius(15),
         border: pw.Border.all(color: const PdfColor.fromInt(0xFF99F6E4)),
       ),
-      child: pw.Text(
+      // A Wrap bounds its children to the Wrap's own width, so this measures
+      // against the real column and marks a shortening rather than letting the
+      // chip stretch to the full rail and stop mid-phrase (skills rule item 3).
+      child: markedText(
         label,
-        maxLines: 1,
         style: pw.TextStyle(
           font: sans.semiBold,
           fontSize: 8,

@@ -323,15 +323,15 @@ class EmberTemplate extends ResumeTemplate {
   /// dart_pdf has no FractionallySizedBox, and a measured pixel width would go
   /// wrong the moment the column flex changes.
   pw.Widget _skillMeter(Skill s, LoadedFamily sans, TemplatePalette p) {
-    final filled = s.level.clamp(0, 5);
-    final empty = 5 - filled;
+    final filled = skillRating(s);
+    final empty = filled == null ? 0 : 5 - filled;
 
     return pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 10),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          clampedText(
+          markedText(
             s.name,
             style: pw.TextStyle(
               font: sans.regular,
@@ -339,16 +339,18 @@ class EmberTemplate extends ResumeTemplate {
               color: p.ink,
             ),
           ),
-          pw.SizedBox(height: 4),
-          pw.Container(
-            height: 4,
-            decoration: pw.BoxDecoration(
-              color: p.secondary,
-              borderRadius: pw.BorderRadius.circular(1.75),
-            ),
-            child: pw.Row(
-              children: [
-                if (filled > 0)
+          // Skills rule item 5. An unfilled umber track on a dark page is
+          // exactly what a meter that failed to draw looks like.
+          if (filled != null) ...[
+            pw.SizedBox(height: 4),
+            pw.Container(
+              height: 4,
+              decoration: pw.BoxDecoration(
+                color: p.secondary,
+                borderRadius: pw.BorderRadius.circular(1.75),
+              ),
+              child: pw.Row(
+                children: [
                   pw.Expanded(
                     flex: filled,
                     child: pw.Container(
@@ -358,10 +360,11 @@ class EmberTemplate extends ResumeTemplate {
                       ),
                     ),
                   ),
-                if (empty > 0) pw.Expanded(flex: empty, child: pw.SizedBox()),
-              ],
+                  if (empty > 0) pw.Expanded(flex: empty, child: pw.SizedBox()),
+                ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );

@@ -52,6 +52,22 @@ class PrismTemplate extends ResumeTemplate {
   static const _cardBorder = PdfColor.fromInt(0xFFE6E0FA);
   static const _photoSize = 56.0;
 
+  /// Fill for a filled skill chip — one step down the violet ramp from
+  /// [palette]'s `primary`, and the only place the two differ.
+  ///
+  /// White on `primary` (#8B5CF6) measures **4.23 : 1**, and the chip sets its
+  /// label at 8.2 pt, which WCAG counts as normal text and holds to 4.5 : 1.
+  /// It is not illegible, but this catalog checks contrast on the printed page
+  /// rather than eyeballing it, and 4.23 fails. White on #7C3AED measures
+  /// **5.70 : 1** and passes, while staying unmistakably the same violet — the
+  /// gradient bar, the card titles and the borders are untouched. A darker fill
+  /// also happens to be the right signal: the filled chip means "strongest".
+  ///
+  /// Public only so `test/templates/skills_test.dart` can recompute the ratio
+  /// from the constant itself rather than from a number copied into a comment,
+  /// which is how 4.23 survived review in the first place.
+  static const strongChipFill = PdfColor.fromInt(0xFF7C3AED);
+
   @override
   pw.Widget build(TemplateContext ctx) {
     final sans = ctx.family(FontFamily.sans);
@@ -378,17 +394,17 @@ class PrismTemplate extends ResumeTemplate {
     return pw.Container(
       padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: pw.BoxDecoration(
-        color: strong ? p.primary : p.accent,
+        color: strong ? strongChipFill : p.accent,
         borderRadius: pillRadius(17),
         border: pw.Border.all(
-          color: strong ? p.primary : _cardBorder,
+          color: strong ? strongChipFill : _cardBorder,
           width: 0.8,
         ),
       ),
-      child: pw.Text(
+      // Skills rule item 3. The Wrap bounds this to the card, so a long name is
+      // marked with `…` instead of stretching the chip and stopping mid-phrase.
+      child: markedText(
         s.name,
-        maxLines: 1,
-        overflow: pw.TextOverflow.clip,
         style: pw.TextStyle(
           font: sans.semiBold,
           fontSize: 8.2,
