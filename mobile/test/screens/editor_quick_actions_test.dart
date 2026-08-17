@@ -39,7 +39,14 @@ void main() {
 
   /// A viewport tall enough to build the whole form at once, so assertions are
   /// about content rather than about how far a ListView has been scrolled.
-  const tall = Size(430, 4000);
+  ///
+  /// Deliberately generous. The form's height is not fixed — the phone field's
+  /// country control drops below the number when the two cannot share a line,
+  /// and under the test font (every glyph a full em box) that happens at widths
+  /// where a device with Inter loaded still fits them side by side. A viewport
+  /// sized to the form as it is today would fail the next time any field grows
+  /// a line, rather than the next time this screen actually breaks.
+  const tall = Size(430, 6000);
 
   Future<void> pumpEditor(
     WidgetTester tester,

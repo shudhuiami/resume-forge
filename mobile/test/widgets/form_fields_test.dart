@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:resume_forge/phone.dart';
 import 'package:resume_forge/theme/app_theme.dart';
 import 'package:resume_forge/widgets/form_fields.dart';
 
@@ -475,6 +476,558 @@ void main() {
         tester.getSize(find.widgetWithText(ChoiceChip, 'Jun')).height,
         greaterThanOrEqualTo(44),
       );
+    });
+  });
+
+  /// The phone field turns one stored string into two controls and back again.
+  ///
+  /// Everything here is about what it refuses to do: it does not put a dial
+  /// code in front of a number that was saved without one, it does not name a
+  /// country it only guessed at, it does not rewrite the separators the user
+  /// typed, and it does not refuse a number the plausibility check dislikes.
+  group('PhoneField', () {
+    /// Every string the field has handed to `onChanged`, newest last. This is
+    /// what would be stored, so it is what the assertions are about.
+    late List<String> pushed;
+
+    setUp(() => pushed = <String>[]);
+
+    Future<void> pumpPhone(
+      WidgetTester tester, {
+      required String initial,
+      Size size = const Size(430, 900),
+      double textScale = 1,
+    }) async {
+      tester.view.physicalSize = size * tester.view.devicePixelRatio;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.build(),
+          home: Builder(
+            builder: (context) => MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.linear(textScale)),
+              child: Scaffold(
+                body: _Rebuildable(
+                  initial: initial,
+                  builder: (value, onChanged) => PhoneField(
+                    value: value,
+                    onChanged: (v) {
+                      pushed.add(v);
+                      onChanged(v);
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    Finder codeButton() => find.byKey(PhoneField.codeButtonKey);
+    Finder numberField() => find.widgetWithText(TextField, 'Phone');
+
+    /// The control's value, which is every string it draws except its own
+    /// floating label.
+    String codeText(WidgetTester tester) => tester
+        .widgetList<Text>(
+          find.descendant(of: codeButton(), matching: find.byType(Text)),
+        )
+        .map((text) => text.data)
+        .whereType<String>()
+        .firstWhere((data) => data != 'Code');
+
+    String? hintOf(WidgetTester tester) =>
+        tester.widget<TextField>(numberField()).decoration?.hintText;
+
+    Future<void> openPicker(WidgetTester tester) async {
+      await tester.tap(codeButton());
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('splits a stored international number into its two parts', (
+      tester,
+    ) async {
+      // Deliberately not the country's own example number: that string is also
+      // the placeholder, which stays in the tree behind the text.
+      await pumpPhone(tester, initial: '+880 1811-999888');
+
+      expect(codeText(tester), '+880');
+      expect(
+        find.text('1811-999888'),
+        findsOneWidget,
+        reason: 'the number field holds the national part, code taken off',
+      );
+    });
+
+    /// The case every resume saved before this field existed is in.
+    /// `splitPhoneNumber` answers `country == null` there, which means "the
+    /// whole string is the number" — not "use the default".
+    testWidgets('a number saved without a code keeps every character', (
+      tester,
+    ) async {
+      await pumpPhone(tester, initial: '(415) 555-0134');
+
+      expect(codeText(tester), 'None');
+      expect(find.text('(415) 555-0134'), findsOneWidget);
+      expect(pushed, isEmpty, reason: 'reading a value must not write one');
+    });
+
+    testWidgets('typing into a code-less number prepends nothing', (
+      tester,
+    ) async {
+      await pumpPhone(tester, initial: '020 7946 0018');
+      await tester.enterText(numberField(), '020 7946 0019');
+      await tester.pump();
+
+      expect(pushed.last, '020 7946 0019');
+    });
+
+    testWidgets('picking a country is what puts a code in front of a number', (
+      tester,
+    ) async {
+      await pumpPhone(tester, initial: '01712 345678');
+      expect(codeText(tester), 'None');
+
+      await openPicker(tester);
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Search'),
+        'Bangla',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bangladesh'));
+      await tester.pumpAndSettle();
+
+      expect(pushed.last, '+880 01712 345678');
+      expect(
+        find.text('01712 345678'),
+        findsOneWidget,
+        reason: 'the number itself is untouched — no trunk zero stripped',
+      );
+    });
+
+    testWidgets('an untouched field stores nothing when a country is picked', (
+      tester,
+    ) async {
+      await pumpPhone(tester, initial: '');
+
+      await openPicker(tester);
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Search'),
+        'Bangla',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bangladesh'));
+      await tester.pumpAndSettle();
+
+      expect(
+        pushed.every((v) => v.isEmpty),
+        isTrue,
+        reason: 'a bare "+880" would print as a broken number on the PDF',
+      );
+      expect(codeText(tester), '+880');
+    });
+
+    /// QA's actual request: the placeholder shows the shape a number is written
+    /// in wherever the user is.
+    testWidgets('the placeholder follows the country', (tester) async {
+      await pumpPhone(tester, initial: '');
+      final before = hintOf(tester);
+
+      await openPicker(tester);
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Search'),
+        'Bangla',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bangladesh'));
+      await tester.pumpAndSettle();
+
+      expect(hintOf(tester), '1712-345678');
+      expect(hintOf(tester), isNot(before));
+    });
+
+    testWidgets('the picker takes a code back off again', (tester) async {
+      await pumpPhone(tester, initial: '+880 1712-345678');
+
+      await openPicker(tester);
+      await tester.tap(find.text('No country code'));
+      await tester.pumpAndSettle();
+
+      expect(pushed.last, '1712-345678');
+      expect(codeText(tester), 'None');
+    });
+
+    /// `+1` covers 25 countries. The dial code is a fact — it is in the user's
+    /// own text — but which country it belongs to is not, so the field shows
+    /// the one and never claims the other.
+    group('a shared dial code', () {
+      testWidgets('is shown without naming a country', (tester) async {
+        await pumpPhone(tester, initial: '+1 415 555 0134');
+
+        expect(codeText(tester), '+1');
+        expect(find.textContaining('United States'), findsNothing);
+      });
+
+      testWidgets('leaves every row in the picker unticked', (tester) async {
+        await pumpPhone(tester, initial: '+1 415 555 0134');
+        await openPicker(tester);
+
+        expect(
+          find.byIcon(Icons.check),
+          findsNothing,
+          reason:
+              'a guess ticked as a selection is a finding the app cannot make',
+        );
+        expect(
+          find.textContaining('use +1'),
+          findsOneWidget,
+          reason: 'the unticked list needs to say why it is unticked',
+        );
+      });
+
+      testWidgets('resolves for real when the number says which country', (
+        tester,
+      ) async {
+        // 204 is a Manitoba area code, which the table carries — so this one
+        // is a finding rather than a fallback, and the picker may say so.
+        await pumpPhone(tester, initial: '+1 204 555 0134');
+        await openPicker(tester);
+
+        expect(find.byIcon(Icons.check), findsOneWidget);
+        expect(find.text('Canada'), findsWidgets);
+        expect(find.text('Currently in use'), findsOneWidget);
+      });
+    });
+
+    group('the plausibility check', () {
+      testWidgets('says nothing while the number is still being typed', (
+        tester,
+      ) async {
+        await pumpPhone(tester, initial: '');
+        await tester.tap(numberField());
+        await tester.pump();
+        await tester.enterText(numberField(), '12');
+        await tester.pump();
+
+        expect(
+          find.textContaining('too short'),
+          findsNothing,
+          reason: 'scolding someone mid-number is not help',
+        );
+      });
+
+      testWidgets('shows a note once the user has moved on, and still saves', (
+        tester,
+      ) async {
+        await pumpPhone(tester, initial: '');
+        await tester.tap(numberField());
+        await tester.pump();
+        await tester.enterText(numberField(), '12');
+        await tester.pump();
+
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('too short'), findsOneWidget);
+        expect(
+          pushed.last,
+          '+1 12',
+          reason: 'the check never withholds what the user typed',
+        );
+      });
+
+      testWidgets('has nothing to say about an empty field', (tester) async {
+        await pumpPhone(tester, initial: '');
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pumpAndSettle();
+
+        expect(find.byIcon(Icons.info_outline), findsNothing);
+      });
+    });
+
+    /// The control shows a dial code and a chevron and nothing else, so
+    /// everything a screen reader needs has to be stated: what it is, what it
+    /// currently holds, and that it can be pressed.
+    group('the code control for a screen reader', () {
+      testWidgets('is a pressable button that names itself and its value', (
+        tester,
+      ) async {
+        final handle = tester.ensureSemantics();
+        await pumpPhone(tester, initial: '+880 1811-999888');
+
+        final node = tester.getSemantics(codeButton());
+        expect(node.label, contains('Country code'));
+        expect(
+          node.value,
+          contains('Bangladesh'),
+          reason: 'the name is not on screen; it has to be spoken',
+        );
+        expect(
+          node,
+          isSemantics(isButton: true, hasTapAction: true),
+          reason: 'it opens a picker, and has to announce that it can be',
+        );
+        // Released inside the body: the framework checks for live handles
+        // before tear-downs run.
+        handle.dispose();
+      });
+
+      testWidgets('does not speak a country it only guessed at', (
+        tester,
+      ) async {
+        final handle = tester.ensureSemantics();
+        await pumpPhone(tester, initial: '+1 415 555 0134');
+
+        final node = tester.getSemantics(codeButton());
+        expect(node.value, '+1');
+        expect(node.value, isNot(contains('United States')));
+        handle.dispose();
+      });
+    });
+
+    /// The reason this field does not use `_ModelBackedField`: re-deriving the
+    /// national part from the stored string on every keystroke hands the text
+    /// back through `splitPhoneNumber`, which drops the separators between the
+    /// dial code and the first digit. Typing `(` would erase it again.
+    testWidgets('separators the user types survive the round trip', (
+      tester,
+    ) async {
+      await pumpPhone(tester, initial: '+1 5550134');
+      await tester.enterText(numberField(), '(415');
+      await tester.pump();
+
+      expect(find.text('(415'), findsOneWidget);
+      expect(pushed.last, '+1 (415');
+    });
+
+    /// The number most people have to hand is a whole international one, and
+    /// the number field is where it gets pasted. Joining a dial code onto the
+    /// front of that would store a number that dials nowhere.
+    group('a whole international number typed into the number field', () {
+      testWidgets('moves its code into the control instead of doubling up', (
+        tester,
+      ) async {
+        await pumpPhone(tester, initial: '');
+        expect(codeText(tester), '+1');
+
+        await tester.enterText(numberField(), '+44 20 7946 0018');
+        await tester.pump();
+
+        expect(pushed.last, '+44 20 7946 0018');
+        expect(codeText(tester), '+44');
+        expect(find.text('20 7946 0018'), findsOneWidget);
+      });
+
+      testWidgets('leaves half a dial code alone while it is being typed', (
+        tester,
+      ) async {
+        await pumpPhone(tester, initial: '');
+
+        await tester.enterText(numberField(), '+4');
+        await tester.pump();
+
+        expect(pushed.last, '+4');
+        expect(
+          find.text('+4'),
+          findsOneWidget,
+          reason: 'a code that has not resolved is still the user\'s text',
+        );
+        expect(codeText(tester), 'None');
+      });
+    });
+
+    /// Load sample, undo and clear all replace the document under the field.
+    testWidgets('follows the document when it is replaced from outside', (
+      tester,
+    ) async {
+      await pumpPhone(tester, initial: '');
+      tester
+          .state<_RebuildableState>(find.byType(_Rebuildable))
+          .push('+44 20 7946 0018');
+      await tester.pump();
+
+      expect(codeText(tester), '+44');
+      expect(find.text('20 7946 0018'), findsOneWidget);
+
+      tester.state<_RebuildableState>(find.byType(_Rebuildable)).push('');
+      await tester.pump();
+
+      expect(find.text('20 7946 0018'), findsNothing);
+    });
+
+    group('the country picker', () {
+      testWidgets('finds a country by name, code, or dial code', (
+        tester,
+      ) async {
+        await pumpPhone(tester, initial: '');
+        await openPicker(tester);
+
+        final search = find.widgetWithText(TextField, 'Search');
+        for (final query in ['Bangla', 'BD', '880']) {
+          await tester.enterText(search, query);
+          await tester.pumpAndSettle();
+          expect(find.text('Bangladesh'), findsOneWidget, reason: query);
+        }
+      });
+
+      testWidgets('says so when a search matches nothing', (tester) async {
+        await pumpPhone(tester, initial: '');
+        await openPicker(tester);
+        await tester.enterText(
+          find.widgetWithText(TextField, 'Search'),
+          'zzzzz',
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('No country matches'), findsOneWidget);
+        expect(
+          find.text('No country code'),
+          findsOneWidget,
+          reason: 'the way back to a code-less number stays reachable',
+        );
+      });
+
+      testWidgets('dismissing it changes nothing', (tester) async {
+        await pumpPhone(tester, initial: '+880 1712-345678');
+        await openPicker(tester);
+        Navigator.of(tester.element(find.text('No country code'))).pop();
+        await tester.pumpAndSettle();
+
+        expect(pushed, isEmpty);
+        expect(codeText(tester), '+880');
+      });
+
+      /// The sheet shipped overflowing here by 14px: a heading, a search
+      /// field and two two-line rows are taller than the 258px a landscape
+      /// sheet has to give, and the `Flexible` list could shrink to nothing
+      /// while its fixed siblings could not. Everything below the search now
+      /// rides in the one scrollable.
+      for (final (size, scale) in const [
+        (Size(800, 360), 1.0),
+        (Size(800, 360), 2.0),
+        (Size(360, 800), 2.0),
+        (Size(768, 1024), 2.0),
+      ]) {
+        testWidgets(
+          'opens at ${size.width.toInt()}x${size.height.toInt()}, ${scale}x',
+          (tester) async {
+            // The sheet is a route above the widget under test, so it does not
+            // inherit a MediaQuery pushed in around it — the text size has to
+            // come from the platform for this to be an assertion about the
+            // sheet at all.
+            tester.platformDispatcher.textScaleFactorTestValue = scale;
+            addTearDown(
+              tester.platformDispatcher.clearTextScaleFactorTestValue,
+            );
+
+            await pumpPhone(
+              tester,
+              initial: '+880 1811-999888',
+              size: size,
+              textScale: scale,
+            );
+            await openPicker(tester);
+
+            expect(find.text('No country code'), findsOneWidget);
+            expect(
+              find.byType(ListView),
+              findsOneWidget,
+              reason: 'a short viewport has to scroll, not clip',
+            );
+          },
+        );
+      }
+
+      testWidgets('builds its rows lazily rather than all 246 at once', (
+        tester,
+      ) async {
+        await pumpPhone(tester, initial: '');
+        await openPicker(tester);
+
+        expect(find.byType(ListView), findsOneWidget);
+        expect(
+          find.byType(ListTile).evaluate().length,
+          lessThan(phoneCountries.length),
+        );
+      });
+    });
+
+    group('layout', () {
+      /// A code control beside a number field is the pair most likely to run
+      /// out of room, and the answer is the one the date pair already uses:
+      /// measure the content, then stack rather than clip.
+      ///
+      /// Only the two ends are pinned. The test font draws every glyph as a
+      /// full em box, so the width where the pair gives up the shared row is
+      /// not the width a device with Inter loaded arrives at — asserting a
+      /// threshold here would be asserting the test font.
+      for (final (size, scale, sameRow) in const [
+        (Size(430, 900), 1.0, true),
+        (Size(360, 900), 2.0, false),
+      ]) {
+        testWidgets('${size.width.toInt()}px at ${scale}x '
+            '${sameRow ? 'shares a row' : 'stacks'}', (tester) async {
+          await pumpPhone(
+            tester,
+            initial: '+880 1712-345678',
+            size: size,
+            textScale: scale,
+          );
+
+          final code = tester.getRect(codeButton());
+          final number = tester.getRect(numberField());
+          if (sameRow) {
+            expect(code.top, number.top);
+          } else {
+            expect(number.top, greaterThanOrEqualTo(code.bottom));
+          }
+        });
+      }
+
+      /// A format the user cannot finish reading is not a format. At double
+      /// text size on a small phone even a full-width field is narrower than
+      /// `(201) 555-0123`, so the hint is allowed a second line rather than
+      /// being cut off mid-number.
+      for (final (size, scale) in const [
+        (Size(360, 900), 1.0),
+        (Size(360, 900), 2.0),
+        (Size(430, 900), 2.0),
+      ]) {
+        testWidgets(
+          'the whole placeholder fits at ${size.width.toInt()}px, ${scale}x',
+          (tester) async {
+            await pumpPhone(tester, initial: '', size: size, textScale: scale);
+
+            final field = tester.widget<TextField>(numberField());
+            final painter =
+                TextPainter(
+                  text: TextSpan(
+                    text: field.decoration!.hintText,
+                    style: AppTheme.build().textTheme.bodyLarge,
+                  ),
+                  textScaler: TextScaler.linear(scale),
+                  maxLines: field.decoration!.hintMaxLines,
+                  textDirection: TextDirection.ltr,
+                )..layout(
+                  // The decoration's own horizontal padding is not the hint's to
+                  // use.
+                  maxWidth: tester.getSize(numberField()).width - 32,
+                );
+            addTearDown(painter.dispose);
+
+            expect(
+              painter.didExceedMaxLines,
+              isFalse,
+              reason: 'a format hint cut in half is worse than no hint',
+            );
+          },
+        );
+      }
     });
   });
 

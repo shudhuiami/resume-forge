@@ -592,7 +592,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     return TabBarView(
       controller: _tabs,
       children: [
-        _EditorForm(controller: _controller, onPickPhoto: _pickPhoto),
+        _EditorForm(
+          controller: _controller,
+          onPickPhoto: _pickPhoto,
+          onChangeTemplate: _changeTemplate,
+        ),
         Padding(
           padding: EdgeInsets.all(context.tokens.spaceLg),
           child: PdfPageView(
@@ -641,14 +645,14 @@ class _EditorTitle extends StatelessWidget {
   /// [kToolbarHeight], so nothing shrinks the bar below the standard.
   static double toolbarHeight(BuildContext context) {
     final theme = Theme.of(context);
-    final titleLine = _measureText(
+    final titleLine = measureText(
       context,
       'Ag',
       theme.appBarTheme.titleTextStyle ?? theme.textTheme.titleLarge,
     ).height;
     final statusLine = math.max(
       _SaveStatus.glyphSize,
-      _measureText(context, 'Ag', _statusStyle(theme, saveOk: true)).height,
+      measureText(context, 'Ag', _statusStyle(theme, saveOk: true)).height,
     );
     return math.max(kToolbarHeight, titleLine + statusLine + _breathing);
   }
@@ -679,22 +683,6 @@ class _EditorTitle extends StatelessWidget {
       ],
     );
   }
-}
-
-/// Size [text] takes at the current text size, laid out with the real style.
-///
-/// Measured rather than assumed for the same reason the skill rating label is:
-/// a number that is right at one text size is wrong at every other one.
-Size _measureText(BuildContext context, String text, TextStyle? style) {
-  final painter = TextPainter(
-    text: TextSpan(text: text, style: style),
-    textScaler: MediaQuery.textScalerOf(context),
-    maxLines: 1,
-    textDirection: Directionality.of(context),
-  )..layout();
-  final size = painter.size;
-  painter.dispose();
-  return size;
 }
 
 /// Saving / saved / not saved, in that order of interest.
@@ -843,10 +831,19 @@ class _MenuRow extends StatelessWidget {
 }
 
 class _EditorForm extends StatelessWidget {
-  const _EditorForm({required this.controller, required this.onPickPhoto});
+  const _EditorForm({
+    required this.controller,
+    required this.onPickPhoto,
+    required this.onChangeTemplate,
+  });
 
   final EditorController controller;
   final VoidCallback onPickPhoto;
+
+  /// Opens the gallery. Reached from the photo tile as well as the app bar,
+  /// because the tile is where the user finds out their design ignores the
+  /// portrait they just added.
+  final VoidCallback onChangeTemplate;
 
   ResumeData get data => controller.state.data;
 
@@ -873,6 +870,8 @@ class _EditorForm extends StatelessWidget {
   }
 
   Widget _buildForm(BuildContext context, AppTokens tokens, PersonalInfo info) {
+    final template = templateById(controller.state.doc.templateId);
+
     return ListView(
       // Addressable so tests can scroll this list rather than the TabBarView's
       // own PageView, which is the first Scrollable in the tree.
@@ -894,6 +893,13 @@ class _EditorForm extends StatelessWidget {
           children: [
             _PhotoTile(
               photo: info.photo,
+              // Five of the thirteen designs render no portrait at all, which
+              // is deliberate and said so in their own doc comments — but the
+              // app never said it to the user, so a photo added on one of them
+              // simply did not appear (QA-10).
+              templateName: template.name,
+              templateShowsPhoto: templateShowsPhoto(template.id),
+              onChangeTemplate: onChangeTemplate,
               onPick: onPickPhoto,
               onRemove: () {
                 _edit(
@@ -935,11 +941,8 @@ class _EditorForm extends StatelessWidget {
                     d.copyWith(personalInfo: d.personalInfo.copyWith(email: v)),
               ),
             ),
-            ResumeTextField(
-              label: 'Phone',
+            PhoneField(
               value: info.phone,
-              keyboardType: TextInputType.phone,
-              autofillHints: const [AutofillHints.telephoneNumber],
               onChanged: (v) => _edit(
                 (d) =>
                     d.copyWith(personalInfo: d.personalInfo.copyWith(phone: v)),
@@ -1437,7 +1440,7 @@ class _DateFieldPair extends StatelessWidget {
         // leading content padding, and the picker button's touch target.
         final chrome = tokens.spaceLg + tokens.minTouchTarget;
         final needed =
-            _measureText(
+            measureText(
               context,
               _widestValue,
               theme.textTheme.bodyLarge,
@@ -1492,18 +1495,9 @@ class _SkillSlider extends StatelessWidget {
   /// way the home screen's quick actions measure theirs, so the box is right at
   /// every text size instead of at one of them.
   static double _labelWidth(BuildContext context, TextStyle? style) {
-    final scaler = MediaQuery.textScalerOf(context);
-    final direction = Directionality.of(context);
     var width = 0.0;
     for (final label in _labels) {
-      final painter = TextPainter(
-        text: TextSpan(text: label, style: style),
-        textScaler: scaler,
-        maxLines: 1,
-        textDirection: direction,
-      )..layout();
-      width = math.max(width, painter.width);
-      painter.dispose();
+      width = math.max(width, measureText(context, label, style).width);
     }
     return width;
   }
@@ -1568,11 +1562,23 @@ class _SkillSlider extends StatelessWidget {
 class _PhotoTile extends StatelessWidget {
   const _PhotoTile({
     required this.photo,
+    required this.templateName,
+    required this.templateShowsPhoto,
+    required this.onChangeTemplate,
     required this.onPick,
     required this.onRemove,
   });
 
   final dynamic photo;
+
+  /// The design the document is on, named so the note can say which one is
+  /// leaving the photo out rather than blaming "the design".
+  final String templateName;
+
+  /// False for the designs that draw no portrait at all.
+  final bool templateShowsPhoto;
+
+  final VoidCallback onChangeTemplate;
   final VoidCallback onPick;
   final VoidCallback onRemove;
 
@@ -1648,6 +1654,18 @@ class _PhotoTile extends StatelessWidget {
               ),
             ],
           ),
+          // Only when there is really something to say: the user has added a
+          // photo *and* this design does not draw one. A permanent label on
+          // five designs would be read once and never again, while this
+          // appears exactly when it answers a question the user is about to
+          // ask.
+          if (has && !templateShowsPhoto) ...[
+            SizedBox(height: tokens.spaceMd),
+            _PhotoIgnoredNote(
+              templateName: templateName,
+              onChangeTemplate: onChangeTemplate,
+            ),
+          ],
           SizedBox(height: tokens.spaceMd),
           // Below the row rather than beside it: a button sharing the row with
           // the avatar and the copy has nowhere left to go once either grows.
@@ -1670,6 +1688,75 @@ class _PhotoTile extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Says that the design in use leaves the user's photo out.
+///
+/// Five of the thirteen designs render no portrait — see `photoFreeTemplateIds`,
+/// which is derived from the templates' own source rather than listed by hand —
+/// and three of them say in their doc comments that a photograph is not part of
+/// the design. That is not a defect, and adding photos to them would erase a
+/// deliberate distinction between the designs. The defect QA actually found is
+/// that **nothing ever told the user**: a photo was added, a design was chosen,
+/// and the portrait silently did not appear.
+///
+/// So this is a disclosure, not a warning. It states which design is leaving
+/// the photo out, says the photo is still there, and offers the one action that
+/// changes the outcome. Deliberately not the error container the truncation
+/// banner uses: nothing has been lost and nothing has failed — the design is
+/// doing what it says it does.
+class _PhotoIgnoredNote extends StatelessWidget {
+  const _PhotoIgnoredNote({
+    required this.templateName,
+    required this.onChangeTemplate,
+  });
+
+  final String templateName;
+  final VoidCallback onChangeTemplate;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tokens = context.tokens;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // The accent, which is what the eye finds on this palette, and the one
+        // colour in the app that means "look here". 9.06:1 on the well it is
+        // drawn in, the same pairing every section mark uses.
+        Icon(
+          Icons.hide_image_outlined,
+          size: 20,
+          color: theme.colorScheme.primary,
+        ),
+        SizedBox(width: tokens.spaceMd),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '$templateName is a text-only design and prints no photo. '
+                'Your photo stays saved, ready for a design that shows one.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+              // Left-aligned under the sentence it follows, and its own node
+              // for a screen reader rather than merged into the explanation.
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: onChangeTemplate,
+                  child: const Text('Change design'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

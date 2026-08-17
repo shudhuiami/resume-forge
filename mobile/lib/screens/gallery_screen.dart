@@ -43,6 +43,12 @@ const _bestForLineHeight = 16.0;
 /// It lives here, not in `templates/`, because it is presentation copy for the
 /// picker. The templates own their `description` and `bestFor`; this is the
 /// shorter thing that fits under a 130px-wide thumbnail.
+///
+/// Every cue names the design's stance on a photo — "Photo" or "No photo" —
+/// and `gallery_layout_test` holds each one to [templateShowsPhoto], so a cue
+/// cannot claim a portrait the design does not draw. Terminal and Orchid used
+/// to be the two that said nothing either way, which is how a photo-free design
+/// could be chosen with no warning at all (QA-10).
 @visibleForTesting
 const templateCues = <String, String>{
   'aurora': 'Two column · Photo · Skill meters',
@@ -51,14 +57,50 @@ const templateCues = <String, String>{
   'ledger': 'One column · Ruled rows · No photo',
   'compass': 'Two column · Photo · Skill chips',
   'circuit': 'Two column · Photo · Monospace data',
-  'terminal': 'One column · Dark page · Monospace',
+  'terminal': 'Dark page · Monospace · No photo',
   'quill': 'One column · Serif · No photo',
   'linen': 'One column · Minimal · No photo',
   'coral': 'Two column · Photo · Centred name',
-  'orchid': 'One column · Serif · Side rail',
+  'orchid': 'One column · Side rail · No photo',
   'prism': 'Two column · Photo · Card blocks',
   'ember': 'Two column · Photo · Dark page',
 };
+
+/// The designs that render no portrait at all, however good a photo is given
+/// to them.
+///
+/// Not a preference and not an oversight: an editorial or academic CV is a
+/// byline rather than a headshot, and three of these five say exactly that in
+/// their own doc comments. Adding photos to them would erase a distinction the
+/// gallery advertises.
+///
+/// **The templates own this fact; this is a mirror of it.** The ground truth is
+/// which template files call `tryDecodePhoto`, and
+/// `test/screens/template_photo_support_test.dart` reads that out of
+/// `lib/templates/` and fails if this set disagrees — so a design that gains or
+/// loses a portrait cannot leave the gallery and the editor quietly saying the
+/// old thing. The right long-term home is a `usesPhoto` on the template's own
+/// metadata; that is a change to `lib/templates/` and is proposed rather than
+/// made here.
+///
+/// Lives beside [templateCues] for the same reason that does: it is what the
+/// picker and the editor need to *say* about the catalog, and the theme knows
+/// nothing about resume templates.
+@visibleForTesting
+const photoFreeTemplateIds = <String>{
+  'ledger',
+  'linen',
+  'orchid',
+  'quill',
+  'terminal',
+};
+
+/// Whether the design with this id draws the user's portrait.
+///
+/// Unknown ids answer true, matching [templateById]'s fallback to a design that
+/// does show one: an unknown id is a stale document, not a photo-free design,
+/// and claiming otherwise would put a false note in front of the user.
+bool templateShowsPhoto(String id) => !photoFreeTemplateIds.contains(id);
 
 /// Display name for a category chip and its section copy.
 @visibleForTesting
