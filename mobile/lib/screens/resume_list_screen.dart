@@ -797,7 +797,54 @@ String relativeEditedAt(DateTime when, {DateTime? now}) {
   return 'on ${when.day} ${_months[when.month - 1]} ${when.year}';
 }
 
-/// Page-shaped plate carrying the initials on the resume.
+/// Whether a saved resume's own portrait belongs on its row.
+///
+/// Two conditions, and both are necessary. The user has to have added a photo,
+/// and the design they are on has to be one that actually draws it: five of the
+/// thirteen render no portrait however good a photo they are given, the gallery
+/// says so in every cue and the editor says so under the photo tile, and a row
+/// that showed a headshot for one of those five would contradict both.
+///
+/// It asks [templateShowsPhoto] rather than keeping a second list of ids. That
+/// shared call *is* the guarantee that this screen, the gallery and the editor
+/// cannot drift: `test/screens/template_photo_support_test.dart` derives the
+/// truth from which template files call `tryDecodePhoto`, so a design that
+/// gains or loses a portrait fails that test rather than quietly leaving one of
+/// the three screens saying the old thing.
+///
+/// Top level rather than a static on the private plate, for the same reason
+/// [relativeEditedAt] is: `@visibleForTesting` on a member of a private class
+/// is not visible to anything.
+@visibleForTesting
+bool plateShowsPhoto(ResumeDocument doc) {
+  final photo = doc.data.personalInfo.photo;
+  return photo != null &&
+      photo.isNotEmpty &&
+      templateShowsPhoto(doc.templateId);
+}
+
+/// What a screen reader is told in place of the initials, once the plate is a
+/// photograph.
+///
+/// The plate's job on this screen is to say whose resume the row is, and it
+/// does that with initials drawn from the name — which a screen reader reads
+/// out as the letters they are. Swapping in an image must not cost that
+/// information, so the image carries the identity as its label, from the same
+/// fields in the same order the initials come from: the name, then the
+/// headline, then nothing.
+///
+/// "Photo on this resume" rather than "Photo of Untitled resume" for that last
+/// case: there is no one to name yet, and naming the placeholder would be worse
+/// than naming no one.
+@visibleForTesting
+String platePhotoLabel(ResumeData data) {
+  final name = data.personalInfo.fullName.trim();
+  final who = name.isNotEmpty ? name : data.personalInfo.title.trim();
+  return who.isEmpty ? 'Photo on this resume' : 'Photo of $who';
+}
+
+/// Page-shaped plate: the user's portrait where their design prints one, and
+/// their initials where it does not.
 ///
 /// A4 proportioned so it reads as a document rather than as a contact avatar,
 /// but it does not pretend to be a preview of the design: no header band, no
@@ -809,6 +856,10 @@ String relativeEditedAt(DateTime when, {DateTime? now}) {
 /// section marks. The design's own colour is the card *around* this plate now,
 /// so a second colour here would either match it and vanish or fight it; a
 /// recess reads on all five category tints without either.
+///
+/// A portrait replaces the initials when — and only when — [plateShowsPhoto]
+/// agrees. It is still not a preview of the page: the plate is the person, not
+/// the layout, which is exactly what the initials were.
 class _DesignPlate extends StatelessWidget {
   const _DesignPlate({required this.doc});
 
@@ -833,11 +884,52 @@ class _DesignPlate extends StatelessWidget {
         .join();
   }
 
+  /// The mark the plate carries when there is no photograph to carry instead:
+  /// the initials, or the document glyph when there is not even a name yet.
+  Widget _mark(ThemeData theme) {
+    final initials = initialsFor(doc.data);
+    if (initials.isEmpty) {
+      // Nothing to draw initials from yet, so the plate says "document"
+      // instead of showing a blank sheet.
+      return Icon(
+        Icons.description_outlined,
+        size: _plateGlyphSize,
+        color: theme.colorScheme.primary,
+      );
+    }
+    return Text(
+      initials,
+      maxLines: 1,
+      // The plate is a fixed graphic; at a large text size the initials must
+      // stay inside it rather than burst it.
+      textScaler: TextScaler.noScaling,
+      style: theme.textTheme.titleMedium?.copyWith(
+        color: theme.colorScheme.primary,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.5,
+      ),
+    );
+  }
+
+  /// Device pixels of height to hand the decoder.
+  ///
+  /// The plate's own height at this screen's density — about 238 on a 3x phone,
+  /// against the 512 the photo is stored at. Never zero: `cacheHeight` asserts a
+  /// positive value, and a density this widget cannot make sense of is not one
+  /// it should have an opinion about.
+  static int _decodeHeight(BuildContext context) {
+    final height =
+        _plateWidth / _pageAspect * MediaQuery.devicePixelRatioOf(context);
+    return height.isFinite ? math.max(1, height.round()) : 1;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final tokens = context.tokens;
-    final initials = initialsFor(doc.data);
+    final radius = BorderRadius.circular(tokens.radiusMd);
+    final mark = Center(child: _mark(theme));
+    final photo = plateShowsPhoto(doc) ? doc.data.personalInfo.photo : null;
 
     return SizedBox(
       width: _plateWidth,
@@ -846,30 +938,69 @@ class _DesignPlate extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: theme.colorScheme.surfaceContainerLowest,
-            borderRadius: BorderRadius.circular(tokens.radiusMd),
+            borderRadius: radius,
           ),
-          child: Center(
-            child: initials.isEmpty
-                // Nothing to draw initials from yet, so the plate says
-                // "document" instead of showing a blank sheet.
-                ? Icon(
-                    Icons.description_outlined,
-                    size: _plateGlyphSize,
-                    color: theme.colorScheme.primary,
-                  )
-                : Text(
-                    initials,
-                    maxLines: 1,
-                    // The plate is a fixed graphic; at a large text size the
-                    // initials must stay inside it rather than burst it.
-                    textScaler: TextScaler.noScaling,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: theme.colorScheme.primary,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5,
-                    ),
+          // The well is what the initials sit in, and what shows through in the
+          // frame or two before a portrait has decoded.
+          child: photo == null
+              ? mark
+              : ClipRRect(
+                  borderRadius: radius,
+                  child: Image.memory(
+                    photo,
+                    // Fills the plate, cropping rather than letterboxing or
+                    // stretching. Every stored portrait is a square —
+                    // `PhotoService` centre-crops on import — and a square
+                    // covering a taller-than-wide box is scaled to the box's
+                    // height, so the crop can only come off the sides (14.6%
+                    // from each) and never off the top of a head. Insetting the
+                    // square instead leaves a dead band across a 56px graphic,
+                    // and a photo floated on a page-shaped plate starts to read
+                    // as a mock of a layout, which this card must not become.
+                    fit: BoxFit.cover,
+                    // Decoded at the size it is drawn at rather than the size
+                    // it is stored at: 512x512 is a megabyte of RGBA per
+                    // visible row for a graphic 56px wide, and this is the
+                    // app's cold-start screen with an unbounded number of rows.
+                    // Height alone, not both dimensions — both resizes to
+                    // exactly those numbers and would distort the face, one
+                    // keeps the aspect ratio — and height is the dimension
+                    // `cover` scales a square by. Rows are built lazily, so
+                    // only the ones on screen pay even this.
+                    cacheHeight: _decodeHeight(context),
+                    filterQuality: FilterQuality.medium,
+                    // The same photo across a rebuild keeps its pixels rather
+                    // than blinking back to the initials.
+                    gaplessPlayback: true,
+                    // Labelled below rather than here. `semanticLabel` makes
+                    // the image its own semantics *node*, which would put a
+                    // second stop on every row of an unbounded list; a plain
+                    // annotation is absorbed into the row the way the initials
+                    // are today, so a resume stays one thing to swipe to.
+                    excludeFromSemantics: true,
+                    // Undecodable bytes fall back to the plate this row would
+                    // otherwise have had, not to a hole — and that is the same
+                    // plate the printed page will carry, since `tryDecodePhoto`
+                    // drops exactly the photos this cannot draw. It reads out
+                    // as one too: a portrait that failed is indistinguishable
+                    // from a resume that never had one, which is the truth.
+                    errorBuilder: (context, _, _) => mark,
+                    // Same plate for the frame or two before the decode lands,
+                    // so a row scrolled past at speed is never briefly blank.
+                    // The label goes on here, on the branch that has an actual
+                    // photograph in it, so neither fallback ever claims one:
+                    // it carries the identity the initials used to spell out,
+                    // in the same place on the row they were read out from.
+                    frameBuilder: (context, child, frame, wasSynchronous) =>
+                        frame == null && !wasSynchronous
+                        ? mark
+                        : Semantics(
+                            image: true,
+                            label: platePhotoLabel(doc.data),
+                            child: child,
+                          ),
                   ),
-          ),
+                ),
         ),
       ),
     );

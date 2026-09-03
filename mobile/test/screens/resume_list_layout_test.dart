@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 // `RenderParagraph` is how a test asks whether a line was actually cut short;
@@ -9,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:resume_forge/brand.dart';
 import 'package:resume_forge/data/resume_repository.dart';
+import 'package:resume_forge/data/sample_portrait.dart';
 import 'package:resume_forge/models/resume.dart';
 import 'package:resume_forge/screens/about_screen.dart';
 import 'package:resume_forge/screens/gallery_screen.dart';
@@ -18,6 +20,12 @@ import 'package:resume_forge/templates/registry.dart';
 import 'package:resume_forge/templates/template.dart';
 import 'package:resume_forge/theme/app_theme.dart';
 import 'package:resume_forge/theme/tokens.dart';
+
+/// The plate's own logical height: it is 56px wide at A4 proportions.
+///
+/// Spelled out here rather than read off the screen's private constants, so a
+/// change to either has to be a deliberate one.
+const _plateHeight = 56.0 * 1123 / 794;
 
 /// A repository that cannot read, so the list screen's error branch is
 /// reachable from a test instead of only in theory.
@@ -933,6 +941,303 @@ void main() {
       );
       expect(plate.width / plate.height, closeTo(794 / 1123, 0.02));
       expect(find.text('AO'), findsOneWidget);
+    });
+  });
+
+  /// The row shows the portrait the user added — but only where the design
+  /// they are on would actually print one.
+  ///
+  /// Five of the thirteen designs draw no portrait at all. The gallery says so
+  /// in every cue and the editor says so under the photo tile, so a row that
+  /// showed a headshot for one of those five would contradict both screens the
+  /// user just read. The rule is one shared predicate, not a third list.
+  group('the plate carries the portrait the design will print', () {
+    /// The plate's photograph, if this row has one at all. Nothing else on
+    /// this screen is an `Image` — every other mark is an `Icon` or text.
+    final plateImage = find.descendant(
+      of: find.byType(Card),
+      matching: find.byType(Image),
+    );
+
+    /// The A4 plate itself, photo or no photo.
+    final plate = find.descendant(
+      of: find.byType(Card),
+      matching: find.byType(AspectRatio),
+    );
+
+    ResumeDocument withPhoto(
+      String id, {
+      String? templateId,
+      String name = 'Amara Okonkwo',
+      Uint8List? bytes,
+    }) => newResumeDocument(id: id, templateId: templateId).copyWith(
+      data: ResumeData(
+        personalInfo: PersonalInfo(
+          fullName: name,
+          // The portrait that ships in the app, at the size and encoding
+          // `PhotoService` stores every import at: 512px square, JPEG q85.
+          photo: bytes ?? samplePortraitJpeg,
+        ),
+      ),
+    );
+
+    /// Decodes the plate's portrait for real, and returns its pixel size —
+    /// or null when those bytes are not an image.
+    ///
+    /// Decoding is engine work and a widget test's clock is fake, so a photo
+    /// never resolves during an ordinary pump. Resolving the provider the
+    /// widget is itself holding, inside `runAsync`, completes the very cache
+    /// entry the widget is waiting on; the pumps afterwards are the frames
+    /// where the plate stops being initials and starts being a face.
+    Future<({int width, int height})?> decodePlate(WidgetTester tester) async {
+      final provider = tester.widget<Image>(plateImage).image;
+      final size = await tester.runAsync(() async {
+        final completer = Completer<({int width, int height})?>();
+        final stream = provider.resolve(ImageConfiguration.empty);
+        late final ImageStreamListener listener;
+        listener = ImageStreamListener(
+          (info, _) {
+            if (!completer.isCompleted) {
+              completer.complete((
+                width: info.image.width,
+                height: info.image.height,
+              ));
+            }
+            info.dispose();
+            stream.removeListener(listener);
+          },
+          onError: (error, stack) {
+            if (!completer.isCompleted) completer.complete(null);
+            stream.removeListener(listener);
+          },
+        );
+        stream.addListener(listener);
+        return completer.future;
+      });
+      // One frame to run what the resolve queued on the test's own clock, one
+      // to paint what it changed.
+      await tester.pump();
+      await tester.pump();
+      return size;
+    }
+
+    testWidgets('a photo shows on a design that prints one', (tester) async {
+      final repo = await seeded(tester, [withPhoto('a')]);
+      await pumpList(tester, const Size(390, 844), repo: repo);
+
+      expect(plateImage, findsOneWidget);
+      expect(
+        tester.widget<Image>(plateImage).fit,
+        BoxFit.cover,
+        reason: 'a face is cropped to the page shape, never stretched to it',
+      );
+
+      expect(
+        await decodePlate(tester),
+        isNotNull,
+        reason: 'the portrait has to actually decode, not merely be asked for',
+      );
+      expect(
+        find.text('AO'),
+        findsNothing,
+        reason:
+            'the photo replaces the initials rather than sitting beside '
+            'them',
+      );
+    });
+
+    /// The whole catalog, so the answer can never be a hand-kept list that
+    /// drifts from the one the gallery and the editor read.
+    testWidgets('every design in the catalog answers as the gallery does', (
+      tester,
+    ) async {
+      for (final template in resumeTemplates) {
+        final repo = await seeded(tester, [
+          withPhoto('a', templateId: template.id),
+        ]);
+        await pumpList(tester, const Size(390, 844), repo: repo);
+
+        expect(
+          plateImage,
+          templateShowsPhoto(template.id) ? findsOneWidget : findsNothing,
+          reason: templateShowsPhoto(template.id)
+              ? '${template.id} prints a portrait, so its row must show one'
+              : '${template.id} prints no portrait, so its row must not '
+                    'promise one',
+        );
+      }
+    });
+
+    testWidgets('a design that prints no portrait keeps its initials', (
+      tester,
+    ) async {
+      for (final id in photoFreeTemplateIds) {
+        final repo = await seeded(tester, [withPhoto('a', templateId: id)]);
+        await pumpList(tester, const Size(390, 844), repo: repo);
+
+        expect(find.text('AO'), findsOneWidget, reason: '$id keeps the plate');
+      }
+    });
+
+    testWidgets('a resume with no photo is left exactly as it was', (
+      tester,
+    ) async {
+      final repo = await seeded(tester, [docNamed('a', 'Amara Okonkwo')]);
+      await pumpList(tester, const Size(390, 844), repo: repo);
+
+      expect(plateImage, findsNothing);
+      expect(find.text('AO'), findsOneWidget);
+    });
+
+    /// This is the app's cold-start screen and the list is unbounded, so the
+    /// per-row cost of the photo is part of the feature rather than a detail.
+    testWidgets('the portrait is decoded at plate size, not at stored size', (
+      tester,
+    ) async {
+      final repo = await seeded(tester, [withPhoto('a')]);
+      await pumpList(tester, const Size(390, 844), repo: repo);
+
+      final provider = tester.widget<Image>(plateImage).image;
+      expect(
+        provider,
+        isA<ResizeImage>(),
+        reason: 'a bare MemoryImage decodes at the size it was stored at',
+      );
+      final resized = provider as ResizeImage;
+      expect(
+        resized.width,
+        isNull,
+        reason:
+            'both dimensions resize to exactly those numbers, which for a '
+            'square source in an A4 box is a squashed face',
+      );
+      expect(
+        resized.height,
+        closeTo(_plateHeight * tester.view.devicePixelRatio, 1),
+        reason: 'the decode target is the plate at this density',
+      );
+
+      final decoded = await decodePlate(tester);
+      expect(decoded!.height, closeTo(resized.height!, 1));
+      expect(
+        decoded.height,
+        lessThan(512),
+        reason:
+            'the stored portrait is 512px square and the plate is 56px '
+            'wide; decoding the stored size costs ~1MB of RGBA a row',
+      );
+    });
+
+    testWidgets('a portrait that cannot be decoded falls back to the plate', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      final repo = await seeded(tester, [
+        withPhoto('a', bytes: Uint8List.fromList([0, 1, 2, 3, 4, 5, 6, 7])),
+      ]);
+      await pumpList(tester, const Size(390, 844), repo: repo);
+
+      expect(
+        await decodePlate(tester),
+        isNull,
+        reason: 'these bytes are not an image',
+      );
+      expect(
+        find.text('AO'),
+        findsOneWidget,
+        reason: 'a plate the row can draw, not a hole where a face was',
+      );
+      expect(
+        tester.getSemantics(plate).getSemanticsData().label,
+        contains('AO'),
+        reason: 'and it reads out as the plate it is, with no photo claimed',
+      );
+      handle.dispose();
+    });
+
+    testWidgets('the photo fills the page shape at 2x text on a small phone', (
+      tester,
+    ) async {
+      final repo = await seeded(tester, [withPhoto('a')]);
+      await pumpList(tester, const Size(360, 800), repo: repo, textScale: 2);
+      await decodePlate(tester);
+
+      final shape = tester.getSize(plate);
+      expect(shape.width / shape.height, closeTo(794 / 1123, 0.02));
+
+      final drawn = tester.getSize(plateImage);
+      expect(drawn.width, closeTo(shape.width, 0.01));
+      expect(drawn.height, closeTo(shape.height, 0.01));
+    });
+
+    /// A card is one item to a screen reader — the row merges into a single
+    /// tappable node — so what is under test is what that one item says.
+    testWidgets('a screen reader is still told whose resume the row is', (
+      tester,
+    ) async {
+      // Disposed inside the body: the end-of-test verification runs first and
+      // fails on a handle that is still open.
+      final handle = tester.ensureSemantics();
+      final repo = await seeded(tester, [withPhoto('a')]);
+      await pumpList(tester, const Size(390, 844), repo: repo);
+
+      String rowLabel() => tester.getSemantics(plate).getSemanticsData().label;
+
+      expect(
+        rowLabel(),
+        contains('AO'),
+        reason:
+            'until the photo decodes the plate is the initials plate, and '
+            'reads as one',
+      );
+
+      await decodePlate(tester);
+
+      expect(
+        rowLabel(),
+        contains('Photo of Amara Okonkwo'),
+        reason: 'the initials the photo replaced were the identity on the row',
+      );
+      expect(
+        rowLabel(),
+        isNot(contains('AO')),
+        reason: 'the plate says who this is once, not twice',
+      );
+
+      handle.dispose();
+    });
+
+    test('the label names whoever the initials would have abbreviated', () {
+      expect(
+        platePhotoLabel(
+          const ResumeData(
+            personalInfo: PersonalInfo(fullName: 'Amara Okonkwo'),
+          ),
+        ),
+        'Photo of Amara Okonkwo',
+      );
+      expect(
+        platePhotoLabel(
+          const ResumeData(personalInfo: PersonalInfo(title: 'Staff Engineer')),
+        ),
+        'Photo of Staff Engineer',
+        reason: 'the initials fall back to the headline, so the label does',
+      );
+      expect(
+        platePhotoLabel(const ResumeData()),
+        'Photo on this resume',
+        reason:
+            'there is nobody to name yet, and the placeholder title is '
+            'not a name',
+      );
+    });
+
+    test('an empty photo field is not a photo', () {
+      final doc = newResumeDocument(id: 'a').copyWith(
+        data: ResumeData(personalInfo: PersonalInfo(photo: Uint8List(0))),
+      );
+      expect(plateShowsPhoto(doc), isFalse);
+      expect(plateShowsPhoto(newResumeDocument(id: 'b')), isFalse);
     });
   });
 
