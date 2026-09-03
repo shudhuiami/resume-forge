@@ -74,6 +74,19 @@ void main() {
     ResumeData data,
   ) async => (await linksOf(template, data)).map((a) => a.uri).toList();
 
+  /// The URL annotations only.
+  ///
+  /// Contact details carry `mailto:` and `tel:` annotations of their own now.
+  /// Every assertion in this file was written when a URL was the only thing on
+  /// a page that could be linked, so the ones about *absence* have to say which
+  /// kind of absence they mean. `contact_link_test.dart` covers the other two.
+  Future<List<({String uri, String border})>> urlLinksOf(
+    ResumeTemplate template,
+    ResumeData data,
+  ) async => (await linksOf(template, data))
+      .where((a) => !a.uri.startsWith('mailto:') && !a.uri.startsWith('tel:'))
+      .toList();
+
   ResumeData withUrls({
     required String linkedin,
     required String website,
@@ -314,7 +327,7 @@ void main() {
         // Not "a link to the empty string" and not "a link to the page it sits
         // on" — nothing at all.
         expect(
-          await linksOf(
+          await urlLinksOf(
             template,
             withUrls(linkedin: '', website: '   ', projectLink: '\t '),
           ),
@@ -325,7 +338,7 @@ void main() {
       test('draws no annotation for text that is not a URL', () async {
         // Still drawn as ink — the display rule is unchanged — just not linked.
         expect(
-          await linksOf(
+          await urlLinksOf(
             template,
             withUrls(
               linkedin: 'available on request',
@@ -345,11 +358,17 @@ void main() {
         final links = await linksOf(template, sampleResume);
         expect(links, isNotEmpty);
         for (final link in links) {
-          expect(
-            RegExp(r'^https?://').hasMatch(link.uri),
-            isTrue,
-            reason: 'annotation target "${link.uri}" is not an http(s) URL',
-          );
+          // Scoped to the URL annotations this file is about. Email and phone
+          // are linked too now (mailto:, tel:) and are covered by
+          // contact_link_test.dart; this assertion was written when a URL was
+          // the only thing on a page that could carry an annotation.
+          if (!link.uri.startsWith('mailto:') && !link.uri.startsWith('tel:')) {
+            expect(
+              RegExp(r'^https?://').hasMatch(link.uri),
+              isTrue,
+              reason: 'annotation target "${link.uri}" is not an http(s) URL',
+            );
+          }
           expect(
             link.border.split(RegExp(r'\s+')).where((s) => s.isNotEmpty),
             ['0', '0', '0'],
@@ -368,7 +387,10 @@ void main() {
           targets.length,
           reason: 'duplicate link annotations: $targets',
         );
-        expect(targets.length, lessThanOrEqualTo(4));
+        // Six linkable fields on the sample now, not four: LinkedIn, website,
+        // one project link, plus email and phone since contact details became
+        // tappable.
+        expect(targets.length, lessThanOrEqualTo(6));
       });
 
       test('the annotations are the only thing the scheme changes', () async {
@@ -415,6 +437,11 @@ void main() {
       urlTarget(data.personalInfo.linkedin),
       urlTarget(data.personalInfo.website),
       for (final project in data.projects) urlTarget(project.link),
+      // Contact details carry their own schemes; the point of this test is
+      // that nothing is linked which the user did not type, not that every
+      // target is an http URL.
+      emailTarget(data.personalInfo.email),
+      telTarget(data.personalInfo.phone),
     }.whereType<String>().toSet();
 
     for (final template in resumeTemplates) {

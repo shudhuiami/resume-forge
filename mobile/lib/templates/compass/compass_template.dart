@@ -187,12 +187,12 @@ class CompassTemplate extends ResumeTemplate {
     final p = ctx.palette;
     final info = data.personalInfo;
 
-    final contact = <(String, String, bool)>[
-      ('Email', info.email, false),
-      ('Phone', info.phone, false),
-      ('Location', info.location, false),
-      ('LinkedIn', info.linkedin, true),
-      ('Web', info.website, true),
+    final contact = <(String, String, ContactKind)>[
+      ('Email', info.email, ContactKind.email),
+      ('Phone', info.phone, ContactKind.phone),
+      ('Location', info.location, ContactKind.plain),
+      ('LinkedIn', info.linkedin, ContactKind.url),
+      ('Web', info.website, ContactKind.url),
     ].where((e) => e.$2.trim().isNotEmpty).toList();
 
     final valueStyle = pw.TextStyle(
@@ -224,10 +224,16 @@ class CompassTemplate extends ResumeTemplate {
                   ),
                   // A URL in this ~180pt column needs to break at a path
                   // separator, not wherever the glyph run happens to stop.
-                  if (c.$3)
+                  // The label stays outside the link: it is the design's own
+                  // word, not part of the address.
+                  if (c.$3 == ContactKind.url)
                     urlText(c.$2, maxLines: 3, style: valueStyle)
                   else
-                    clampedText(c.$2, maxLines: 2, style: valueStyle),
+                    contactLink(
+                      c.$2,
+                      c.$3,
+                      child: clampedText(c.$2, maxLines: 2, style: valueStyle),
+                    ),
                 ],
               ),
             ),

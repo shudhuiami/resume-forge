@@ -188,11 +188,11 @@ class OrchidTemplate extends ResumeTemplate {
     final p = ctx.palette;
     final info = data.personalInfo;
 
-    final contact = <String>[
-      info.email,
-      info.phone,
-      info.location,
-    ].where((e) => e.trim().isNotEmpty).toList();
+    final contact = <(String, ContactKind)>[
+      (info.email, ContactKind.email),
+      (info.phone, ContactKind.phone),
+      (info.location, ContactKind.plain),
+    ].where((e) => e.$1.trim().isNotEmpty).toList();
     final links = <String>[
       info.linkedin,
       info.website,
@@ -211,9 +211,13 @@ class OrchidTemplate extends ResumeTemplate {
         if (contact.isNotEmpty || links.isNotEmpty) ...[
           _sectionLabel('Contact', sans, p),
           ...contact.map(
-            (line) => pw.Padding(
+            (c) => pw.Padding(
               padding: const pw.EdgeInsets.only(bottom: 7),
-              child: clampedText(line, maxLines: 2, style: contactStyle),
+              child: contactLink(
+                c.$1,
+                c.$2,
+                child: clampedText(c.$1, maxLines: 2, style: contactStyle),
+              ),
             ),
           ),
           // The rail is ~146pt: a real profile URL needs three lines there,

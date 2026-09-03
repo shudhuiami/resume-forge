@@ -217,12 +217,12 @@ class AuroraTemplate extends ResumeTemplate {
     // the pill chips, the meters), so a mark has somewhere to belong here.
     // Nothing is removed to make room: the value is still drawn in full, so a
     // parser reading the extracted text sees exactly what it saw before.
-    final contact = <(FieldMark, String, bool)>[
-      (FieldMark.email, info.email, false),
-      (FieldMark.phone, info.phone, false),
-      (FieldMark.location, info.location, false),
-      (FieldMark.profile, info.linkedin, true),
-      (FieldMark.website, info.website, true),
+    final contact = <(FieldMark, String, ContactKind)>[
+      (FieldMark.email, info.email, ContactKind.email),
+      (FieldMark.phone, info.phone, ContactKind.phone),
+      (FieldMark.location, info.location, ContactKind.plain),
+      (FieldMark.profile, info.linkedin, ContactKind.url),
+      (FieldMark.website, info.website, ContactKind.url),
     ].where((e) => e.$2.trim().isNotEmpty).toList();
 
     final contactStyle = pw.TextStyle(
@@ -239,7 +239,7 @@ class AuroraTemplate extends ResumeTemplate {
           _sectionTitle('Contact', sans, p),
           ...contact.map(
             (e) =>
-                _contactRow(e.$1, e.$2, isUrl: e.$3, style: contactStyle, p: p),
+                _contactRow(e.$1, e.$2, kind: e.$3, style: contactStyle, p: p),
           ),
           pw.SizedBox(height: 14),
         ],
@@ -346,7 +346,7 @@ class AuroraTemplate extends ResumeTemplate {
   pw.Widget _contactRow(
     FieldMark mark,
     String value, {
-    required bool isUrl,
+    required ContactKind kind,
     required pw.TextStyle style,
     required TemplatePalette p,
   }) {
@@ -363,9 +363,15 @@ class AuroraTemplate extends ResumeTemplate {
           ),
           pw.SizedBox(width: _markGap),
           pw.Expanded(
-            child: isUrl
+            // The mark is left out of the link: it is decoration, and the tap
+            // target a reader aims at is the address itself.
+            child: kind == ContactKind.url
                 ? urlText(value, maxLines: 3, style: style)
-                : clampedText(value, maxLines: 2, style: style),
+                : contactLink(
+                    value,
+                    kind,
+                    child: clampedText(value, maxLines: 2, style: style),
+                  ),
           ),
         ],
       ),

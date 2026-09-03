@@ -244,11 +244,11 @@ class CircuitTemplate extends ResumeTemplate {
         .take(_maxCustomSections)
         .toList();
 
-    final contact = <String>[
-      info.email,
-      info.phone,
-      info.location,
-    ].where((e) => e.trim().isNotEmpty).toList();
+    final contact = <(String, ContactKind)>[
+      (info.email, ContactKind.email),
+      (info.phone, ContactKind.phone),
+      (info.location, ContactKind.plain),
+    ].where((e) => e.$1.trim().isNotEmpty).toList();
     final links = <String>[
       info.linkedin,
       info.website,
@@ -268,10 +268,14 @@ class CircuitTemplate extends ResumeTemplate {
         // gives the right column enough mass to balance the experience list.
         if (contact.isNotEmpty || links.isNotEmpty) ...[
           _sectionTitle('Contact', sans, p),
-          for (final line in contact)
+          for (final (value, kind) in contact)
             pw.Padding(
               padding: const pw.EdgeInsets.only(bottom: 5),
-              child: clampedText(line, style: contactStyle),
+              child: contactLink(
+                value,
+                kind,
+                child: clampedText(value, style: contactStyle),
+              ),
             ),
           // Monospace is wide: a real profile URL takes two of the sidebar's
           // ~199pt lines, and must break at a path separator (URL rule).

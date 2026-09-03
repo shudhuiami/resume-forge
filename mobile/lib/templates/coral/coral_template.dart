@@ -162,12 +162,12 @@ class CoralTemplate extends ResumeTemplate {
     final info = ctx.data.personalInfo;
     final hasPhoto = tryDecodePhoto(info.photo) != null;
 
-    final contact = <(String, bool)>[
-      (info.email, false),
-      (info.phone, false),
-      (info.location, false),
-      (info.linkedin, true),
-      (info.website, true),
+    final contact = <(String, ContactKind)>[
+      (info.email, ContactKind.email),
+      (info.phone, ContactKind.phone),
+      (info.location, ContactKind.plain),
+      (info.linkedin, ContactKind.url),
+      (info.website, ContactKind.url),
     ];
 
     final contactStyle = pw.TextStyle(

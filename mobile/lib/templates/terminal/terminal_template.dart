@@ -276,11 +276,11 @@ class TerminalTemplate extends ResumeTemplate {
     final p = ctx.palette;
     final info = ctx.data.personalInfo;
 
-    final contact = <String>[
-      info.email,
-      info.phone,
-      info.location,
-    ].where((e) => e.trim().isNotEmpty).toList();
+    final contact = <(String, ContactKind)>[
+      (info.email, ContactKind.email),
+      (info.phone, ContactKind.phone),
+      (info.location, ContactKind.plain),
+    ].where((e) => e.$1.trim().isNotEmpty).toList();
     final links = <String>[
       info.linkedin,
       info.website,
@@ -349,12 +349,18 @@ class TerminalTemplate extends ResumeTemplate {
               spacing: 12,
               runSpacing: 4,
               children: [
-                for (final line in contact)
+                for (final (value, kind) in contact)
                   pw.Row(
                     mainAxisSize: pw.MainAxisSize.min,
                     children: [
+                      // The bullet stays outside the link: it belongs to the
+                      // list, not to the value.
                       clampedText('· ', style: bulletStyle),
-                      clampedText(line, style: itemStyle),
+                      contactLink(
+                        value,
+                        kind,
+                        child: clampedText(value, style: itemStyle),
+                      ),
                     ],
                   ),
               ],
@@ -373,7 +379,7 @@ class TerminalTemplate extends ResumeTemplate {
                 clampedText('· ', style: bulletStyle),
                 pw.Expanded(
                   child: contactStrip(
-                    [for (final l in links) (l, true)],
+                    [for (final l in links) (l, ContactKind.url)],
                     // One line only: monospace is wide, and a second run here
                     // costs the page its education block.
                     maxLines: 1,

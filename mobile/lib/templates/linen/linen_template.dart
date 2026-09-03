@@ -524,11 +524,11 @@ class LinenTemplate extends ResumeTemplate {
     final p = ctx.palette;
     final info = ctx.data.personalInfo;
 
-    final contact = <String>[
-      info.email,
-      info.phone,
-      info.location,
-    ].where((e) => e.trim().isNotEmpty).toList();
+    final contact = <(String, ContactKind)>[
+      (info.email, ContactKind.email),
+      (info.phone, ContactKind.phone),
+      (info.location, ContactKind.plain),
+    ].where((e) => e.$1.trim().isNotEmpty).toList();
     final links = <String>[
       info.linkedin,
       info.website,
@@ -565,8 +565,12 @@ class LinenTemplate extends ResumeTemplate {
               spacing: 16,
               runSpacing: 5,
               children: [
-                for (final line in contact)
-                  pw.Text(line, maxLines: 1, style: itemStyle),
+                for (final (value, kind) in contact)
+                  contactLink(
+                    value,
+                    kind,
+                    child: pw.Text(value, maxLines: 1, style: itemStyle),
+                  ),
                 // A Wrap child is bounded by the strip, so the URL rule sizes
                 // each link against that rather than being cut mid-token by the
                 // one-line clamp.

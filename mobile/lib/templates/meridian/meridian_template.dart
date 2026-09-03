@@ -101,12 +101,12 @@ class MeridianTemplate extends ResumeTemplate {
     final photo = tryDecodePhoto(info.photo);
     final photoSize = _sidebarWidth - _sidebarPadding * 2;
 
-    final contact = <(String, String, bool)>[
-      ('Email', info.email, false),
-      ('Phone', info.phone, false),
-      ('Location', info.location, false),
-      ('LinkedIn', info.linkedin, true),
-      ('Web', info.website, true),
+    final contact = <(String, String, ContactKind)>[
+      ('Email', info.email, ContactKind.email),
+      ('Phone', info.phone, ContactKind.phone),
+      ('Location', info.location, ContactKind.plain),
+      ('LinkedIn', info.linkedin, ContactKind.url),
+      ('Web', info.website, ContactKind.url),
     ].where((e) => e.$2.trim().isNotEmpty).toList();
 
     return pw.Padding(
@@ -134,7 +134,7 @@ class MeridianTemplate extends ResumeTemplate {
           ],
           if (contact.isNotEmpty) ...[
             _sidebarHeading('Contact', sans, ctx.palette),
-            ...contact.map((c) => _contactLine(c.$1, c.$2, sans, isUrl: c.$3)),
+            ...contact.map((c) => _contactLine(c.$1, c.$2, sans, kind: c.$3)),
             pw.SizedBox(height: 16),
           ],
           if (data.skills.isNotEmpty) ...[
@@ -183,7 +183,7 @@ class MeridianTemplate extends ResumeTemplate {
     String label,
     String value,
     LoadedFamily sans, {
-    bool isUrl = false,
+    ContactKind kind = ContactKind.plain,
   }) {
     final valueStyle = pw.TextStyle(
       font: sans.regular,
@@ -209,10 +209,16 @@ class MeridianTemplate extends ResumeTemplate {
           pw.SizedBox(height: 1),
           // The sidebar's text column is 148pt; a real profile URL needs three
           // lines there, broken at path separators rather than mid-handle.
-          if (isUrl)
+          // The label above stays outside the link: it is the design's own
+          // word, not part of the address.
+          if (kind == ContactKind.url)
             urlText(value, maxLines: 3, style: valueStyle)
           else
-            clampedText(value, maxLines: 2, style: valueStyle),
+            contactLink(
+              value,
+              kind,
+              child: clampedText(value, maxLines: 2, style: valueStyle),
+            ),
         ],
       ),
     );

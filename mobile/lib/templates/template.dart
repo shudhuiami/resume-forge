@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../models/resume.dart';
+import '../phone.dart';
 import 'fonts.dart';
 
 /// Document colours for one template.
@@ -218,6 +219,12 @@ pw.BorderRadius pillRadius(double height) =>
 //    linked: a URL this app cannot make an address out of is better as plain
 //    ink than as a promise it cannot keep.
 //
+//    The email address and the phone number are tappable too, and they are
+//    *not* covered by this rule — they are not free-text URLs, so nothing
+//    about them is inferred. See THE CONTACT LINK RULE below, which explains
+//    why `mailto:` and `tel:` are safe for those two fields while [urlTarget]
+//    still refuses every scheme but `http` and `https` for these three.
+//
 // The rule is deliberately shared while the *typography* is not: each design
 // keeps its own font, size, and colour for a link. Three helpers implement it,
 // and between them they cover every place a URL appears in the catalog:
@@ -331,6 +338,183 @@ String _asciiUri(String s) {
   return out.toString();
 }
 
+// ---------------------------------------------------------------------------
+// THE CONTACT LINK RULE
+//
+// QA asked for the phone number and the email address to be tappable in the
+// exported PDF, alongside the three URLs that already are. They are, and the
+// reason that is safe here while [urlTarget] still refuses every scheme but
+// `http`/`https` is worth writing down, because the two rules look
+// contradictory until you see which question each is answering.
+//
+// 1. THESE ARE TYPED FIELDS, NOT GUESSED ONES. [urlTarget]'s caution exists
+//    because the LinkedIn, website and project fields are free text: the app
+//    is *inferring* that a string is a web address, and a viewer follows
+//    whatever scheme an annotation names, so inferring `javascript:` or
+//    `file:` from something a user pasted is a hazard. Email and phone are
+//    different in kind — the app is not inferring the scheme, the field
+//    already declares it. `mailto:` for the email field and `tel:` for the
+//    phone field are the only two schemes those fields can ever produce, and
+//    both are written literally below rather than read off the value.
+//
+//    **This does not loosen [urlTarget], and nothing may be routed through
+//    here that is not known to be an address or a number.** [ContactKind] is
+//    how a caller states what it has; there is deliberately no way to ask for
+//    "whatever scheme this string looks like".
+//
+// 2. THE DRAWN TEXT DOES NOT CHANGE. Unlike a URL, a contact value has no
+//    display form — an email shortened is a wrong email, and a phone number
+//    with digits removed is a wrong number. So [contactLink] is a *wrapper*,
+//    never a drawer: it takes the widget the design already built and either
+//    returns it untouched or puts a layout-transparent `pw.UrlLink` around it.
+//    No design's typography, line count or measurement moves.
+//
+// 3. A VALUE THAT IS NOT ONE GETS NO LINK. `on request` and `ask me` are
+//    things people really type into these two fields, and `mailto:on request`
+//    is the same broken promise `https://n/a` would be. Both targets are
+//    gated, and when a gate refuses, the value is still drawn — just as plain
+//    ink, exactly as a non-URL is today. Blank produces nothing at all.
+//
+// 4. THE `mailto:` GATE. `local@domain`, where the domain is the same
+//    dot-separated-labels-ending-in-two-or-more-letters shape [urlTarget]
+//    demands of a host, and the local part is alphanumeric runs joined by
+//    single `.`, `_`, `+`, `-` or `'`. That accepts real addresses and rejects
+//    prose, because prose has no `@` followed by a TLD.
+//
+//    The accepted character set is narrower than RFC 5322 permits on purpose:
+//    every character in it is one RFC 6068 lets a `mailto:` carry literally,
+//    so the target is the address *verbatim* and there is no escaping step
+//    that could mangle it. An address using the rarer legal characters (`&`,
+//    `%`, `/`, `=`) is drawn unlinked rather than encoded on a guess. Case is
+//    preserved: a domain is case-insensitive but a local part is not, and this
+//    is not the place to normalise somebody's address.
+//
+// 5. THE `tel:` RULE. A dialler wants digits; a resume shows grouping. So the
+//    two are computed separately, the same way [urlDisplay] and [urlTarget]
+//    are:
+//
+//        target = 'tel:' + ('+' only if the user typed one) + every digit
+//
+//    `+1 (415) 555-0134` becomes `tel:+14155550134`. Spaces, `(`, `)`, `-`,
+//    `.`, `/`, the en dash and the non-breaking space are visual separators —
+//    RFC 3966 permits some of them and no dialler needs any of them, so all of
+//    them go. The printed number keeps every one.
+//
+//    A leading `+` is kept when it is there and **never added when it is
+//    not**. `lib/phone.dart` makes the same promise for the editor ("no
+//    country-code insertion"): a national number becomes `tel:4155550134`,
+//    which diallers accept, whereas inventing a country code would produce a
+//    confidently wrong international number.
+//
+//    Two gates, and a number must pass both:
+//
+//    - [checkPhoneNumber] from `lib/phone.dart` — the app's existing
+//      plausibility check, which knows the E.164 digit ceiling and the floor
+//      below which a string is a typo rather than a number. Reused rather than
+//      reinvented, so the exported PDF and the editor cannot hold different
+//      opinions about the same string.
+//    - [_dialable] — at most a leading `+`, then digits and visual separators
+//      only. This is the stricter of the two and exists for the one case
+//      [checkPhoneNumber] deliberately allows: a trailing extension.
+//      `+1 415 555 0134 x210` is a fine thing to accept in the editor and a
+//      trap here, because "every digit" of it dials `…0134210`, a different
+//      subscriber. RFC 3966 spells an extension `;ext=210`, but dialler
+//      support for that parameter is uneven and a link that calls the wrong
+//      person is worse than no link — so a number carrying an extension is
+//      printed in full and left unlinked.
+//
+// `test/templates/contact_link_test.dart` reads the `/Link` dictionaries back
+// out of rendered PDFs and holds every design in the registry to all of it.
+// ---------------------------------------------------------------------------
+
+/// What a contact value is known to be, and therefore how it may be linked.
+///
+/// A caller asserts this from the *field* the value came out of, never from
+/// the value's shape. See the contact link rule, item 1.
+enum ContactKind {
+  /// Drawn, never linked. Location, and anything else with no scheme to it.
+  plain,
+  email,
+  phone,
+
+  /// A free-text URL field, linked under the URL rule via [urlTarget].
+  url,
+}
+
+/// An email address this app is willing to put behind a `mailto:`.
+///
+/// See the contact link rule, item 4. The domain half is deliberately the same
+/// shape [_urlHost] demands of a host.
+final _emailAddress = RegExp(
+  r"^[A-Za-z0-9]+(?:[._+'\-][A-Za-z0-9]+)*"
+  r'@(?:[A-Za-z0-9](?:[A-Za-z0-9\-]*[A-Za-z0-9])?\.)+[A-Za-z]{2,}$',
+);
+
+/// A phone number reducible to digits without losing meaning: at most a
+/// leading `+`, then digits and visual separators.
+///
+/// See the contact link rule, item 5 — this is what excludes an extension.
+final _dialable = RegExp('^[+]?[0-9 \u00A0()./\u2013-]+\$');
+
+/// The `mailto:` an email field should open, or null when the value is not an
+/// address. See the contact link rule, item 4.
+///
+/// Pure and total: safe on empty, blank, or malformed input.
+String? emailTarget(String raw) {
+  final s = raw.trim();
+  if (s.isEmpty || !_emailAddress.hasMatch(s)) return null;
+  return 'mailto:$s';
+}
+
+/// The `tel:` a phone field should dial, or null when the value is not a
+/// number this app can reduce to digits. See the contact link rule, item 5.
+///
+/// Pure and total: safe on empty, blank, or malformed input.
+String? telTarget(String raw) {
+  final s = raw.trim();
+  if (s.isEmpty || !_dialable.hasMatch(s)) return null;
+  if (checkPhoneNumber(s) != PhoneIssue.ok) return null;
+
+  final digits = StringBuffer();
+  for (var i = 0; i < s.length; i++) {
+    final unit = s.codeUnitAt(i);
+    if (unit >= 0x30 && unit <= 0x39) digits.write(s[i]);
+  }
+  if (digits.isEmpty) return null;
+  return s.startsWith('+') ? 'tel:+$digits' : 'tel:$digits';
+}
+
+/// The address a contact value of [kind] should open, or null when there is
+/// no honest one to make.
+String? contactTarget(String raw, ContactKind kind) => switch (kind) {
+  ContactKind.plain => null,
+  ContactKind.email => emailTarget(raw),
+  ContactKind.phone => telTarget(raw),
+  ContactKind.url => urlTarget(raw),
+};
+
+/// Makes [child] tappable when [raw] is a linkable value of [kind].
+///
+/// A wrapper and not a drawer — see the contact link rule, item 2. [child] is
+/// whatever the design already built for the value, and it is handed back
+/// untouched when there is no target, so a design that adopts this cannot
+/// change what it prints. `pw.UrlLink` passes its constraints straight through
+/// and adopts the child's box, so the annotation rectangle is the text's own
+/// shrink-wrapped box and nothing on the page moves.
+///
+/// The annotation is built at *paint* time, so a value a `pw.Column` evicted
+/// leaves none behind and a link can never outlive its glyphs — see the ENGINE
+/// HAZARD note.
+pw.Widget contactLink(
+  String raw,
+  ContactKind kind, {
+  required pw.Widget child,
+}) {
+  final target = contactTarget(raw, kind);
+  if (target == null) return child;
+  return pw.UrlLink(destination: target, child: child);
+}
+
 /// Draws a URL under the URL rule above.
 ///
 /// Returns an empty box for empty input, so callers can hand it a field the
@@ -434,7 +618,7 @@ pw.Widget titleWithUrl({
 /// The contact strip: email, phone, location and the two profile URLs on one
 /// separated line, flowing onto a second when they no longer fit.
 ///
-/// Each `(value, isUrl)` becomes one atomic run carrying its own separator, so
+/// Each `(value, kind)` becomes one atomic run carrying its own separator, so
 /// a value that does not fit moves to the next line *whole*. The alternative —
 /// joining all five into one string and clamping it to two lines, which is what
 /// six designs did — drops whatever falls past the clamp, always the website,
@@ -448,7 +632,7 @@ pw.Widget titleWithUrl({
 /// bisection against the same packing rule `pw.Wrap` uses — rather than the
 /// block being allowed to push a job or a degree off the resume.
 pw.Widget contactStrip(
-  List<(String, bool)> items, {
+  List<(String, ContactKind)> items, {
   required pw.TextStyle style,
   int maxLines = 2,
   String separator = '   ·   ',
@@ -456,7 +640,10 @@ pw.Widget contactStrip(
   pw.WrapAlignment alignment = pw.WrapAlignment.start,
 }) {
   final present = items
-      .where((e) => (e.$2 ? urlDisplay(e.$1) : e.$1.trim()).isNotEmpty)
+      .where(
+        (e) => (e.$2 == ContactKind.url ? urlDisplay(e.$1) : e.$1.trim())
+            .isNotEmpty,
+      )
       .toList();
   if (present.isEmpty) return pw.SizedBox();
 
@@ -478,9 +665,9 @@ pw.Widget contactStrip(
         // Natural run widths, each carrying its trailing separator.
         final runs = <double>[];
         for (var i = 0; i < present.length; i++) {
-          final (value, isUrl) = present[i];
+          final (value, kind) = present[i];
           runs.add(
-            width(isUrl ? urlDisplay(value) : value.trim()) +
+            width(kind == ContactKind.url ? urlDisplay(value) : value.trim()) +
                 (i == present.length - 1 ? 0 : sep),
           );
         }
@@ -489,7 +676,9 @@ pw.Widget contactStrip(
           var lines = 1;
           var run = 0.0;
           for (var i = 0; i < runs.length; i++) {
-            final w = present[i].$2 ? math.min(runs[i], limit) : runs[i];
+            final w = present[i].$2 == ContactKind.url
+                ? math.min(runs[i], limit)
+                : runs[i];
             if (i > 0 && run + w > total) {
               lines++;
               run = w;
@@ -526,10 +715,18 @@ pw.Widget contactStrip(
 
       final children = <pw.Widget>[];
       for (var i = 0; i < present.length; i++) {
-        final (value, isUrl) = present[i];
+        final (value, kind) = present[i];
+        final isUrl = kind == ContactKind.url;
+        // A URL carries its own annotation inside [urlText] because only that
+        // helper knows the display form is lossy. Everything else is drawn
+        // exactly as before and wrapped — contact link rule, item 2.
         pw.Widget run = isUrl
             ? urlText(value, style: style, maxWidth: urlCap)
-            : clampedText(value.trim(), style: style);
+            : contactLink(
+                value,
+                kind,
+                child: clampedText(value.trim(), style: style),
+              );
         if (i == present.length - 1) {
           children.add(run);
           break;
