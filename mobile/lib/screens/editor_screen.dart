@@ -24,6 +24,14 @@ import 'gallery_screen.dart';
 /// like a document editor.
 const _maxFormWidth = 640.0;
 
+/// Finder handle for the photo tile.
+///
+/// Exists so a test can assert the tile is *absent* — the whole point of
+/// the photo-free case — which no text finder can say without also passing
+/// when the copy is merely reworded.
+@visibleForTesting
+const photoTileKey = Key('editor-photo-tile');
+
 /// Form-first resume editor.
 ///
 /// The preview lives in its own tab rather than beside the form. An A4 page
@@ -871,6 +879,10 @@ class _EditorForm extends StatelessWidget {
 
   Widget _buildForm(BuildContext context, AppTokens tokens, PersonalInfo info) {
     final template = templateById(controller.state.doc.templateId);
+    // Read from the design registry rather than kept in editor state: it
+    // has to be right the frame the user comes back from the gallery,
+    // which rebuilds this form with a new template id and nothing else.
+    final showsPhoto = templateShowsPhoto(template.id);
 
     return ListView(
       // Addressable so tests can scroll this list rather than the TabBarView's
@@ -891,25 +903,35 @@ class _EditorForm extends StatelessWidget {
           title: 'About you',
           subtitle: 'The header of every design is built from this.',
           children: [
-            _PhotoTile(
-              photo: info.photo,
-              // Five of the thirteen designs render no portrait at all, which
-              // is deliberate and said so in their own doc comments — but the
-              // app never said it to the user, so a photo added on one of them
-              // simply did not appear (QA-10).
-              templateName: template.name,
-              templateShowsPhoto: templateShowsPhoto(template.id),
-              onChangeTemplate: onChangeTemplate,
-              onPick: onPickPhoto,
-              onRemove: () {
-                _edit(
-                  (d) => d.copyWith(
-                    personalInfo: d.personalInfo.copyWith(photo: null),
-                  ),
-                );
-              },
-            ),
-            SizedBox(height: tokens.spaceLg),
+            // Five of the thirteen designs render no portrait at all, which is
+            // deliberate and said so in their own doc comments. Offering a
+            // picker on one of them invites the user to choose, crop and wait
+            // for an image that will be discarded, so the picker is not
+            // offered there at all.
+            //
+            // The photo is the resume's, not the design's, so one that is
+            // already stored outlives a switch to a photo-free design — and
+            // the tile stays, without the picker, so its Remove action does
+            // too. Hiding the only control over data the user created would be
+            // a worse bug than the one being fixed.
+            if (showsPhoto || info.photo != null) ...[
+              _PhotoTile(
+                key: photoTileKey,
+                photo: info.photo,
+                templateName: template.name,
+                templateShowsPhoto: showsPhoto,
+                onChangeTemplate: onChangeTemplate,
+                onPick: onPickPhoto,
+                onRemove: () {
+                  _edit(
+                    (d) => d.copyWith(
+                      personalInfo: d.personalInfo.copyWith(photo: null),
+                    ),
+                  );
+                },
+              ),
+              SizedBox(height: tokens.spaceLg),
+            ],
             ResumeTextField(
               label: 'Full name',
               value: info.fullName,
@@ -1559,20 +1581,45 @@ class _SkillSlider extends StatelessWidget {
 /// punched into so it reads as part of the "About you" group, with the avatar
 /// raised back up to a lighter tint so it still stands out as the subject of
 /// the controls beneath it.
+///
+/// Renders one of two things, and the caller renders neither of them in a third
+/// case:
+///
+///  * **The design prints a portrait** — avatar, add/replace, and remove. The
+///    tile as it has always been.
+///  * **The design prints none, but a photo is stored** — the same well, minus
+///    the picker: what is kept, why this design will not print it, and the two
+///    actions that are still the user's to take. Offering "Add photo" here
+///    invites a crop-and-wait for an image the design will discard, which is
+///    the confusion QA reported; explaining a control that should never have
+///    been offered is not the fix for it.
+///  * **The design prints none and nothing is stored** — the caller drops the
+///    tile entirely. Nothing is being left out, so there is nothing to say, and
+///    a note about an absent control is worse than silence.
+///
+/// The photo belongs to the resume, not to the design, so switching to a
+/// photo-free design never discards it — which is exactly why [onRemove] has to
+/// survive the picker's removal. Data the user created stays theirs to delete
+/// wherever they happen to be standing.
 class _PhotoTile extends StatelessWidget {
   const _PhotoTile({
+    super.key,
     required this.photo,
     required this.templateName,
     required this.templateShowsPhoto,
     required this.onChangeTemplate,
     required this.onPick,
     required this.onRemove,
-  });
+  }) : assert(
+         templateShowsPhoto || photo != null,
+         'a design that prints no photo, over no photo, has nothing to say: '
+         'the caller drops the tile rather than rendering an empty one',
+       );
 
   final dynamic photo;
 
-  /// The design the document is on, named so the note can say which one is
-  /// leaving the photo out rather than blaming "the design".
+  /// The design the document is on, named so the disclosure can say which one
+  /// is leaving the photo out rather than blaming "the design".
   final String templateName;
 
   /// False for the designs that draw no portrait at all.
@@ -1601,69 +1648,31 @@ class _PhotoTile extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: _avatarSize,
-                height: _avatarSize,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  // Raised out of the well it sits in, not sunk further into
-                  // it: an empty avatar drawn in the same tint as its
-                  // surroundings is a hole, not a placeholder.
-                  color: theme.colorScheme.surfaceContainerHigh,
-                  // The visible outline, not the decorative hairline: this
-                  // circle is the subject of the actions below it, and a tint
-                  // step alone leaves it with no edge to speak of.
-                  border: Border.all(color: theme.colorScheme.outline),
-                  image: has
-                      ? DecorationImage(
-                          image: MemoryImage(photo),
-                          fit: BoxFit.cover,
-                        )
-                      : null,
-                ),
-                child: has
-                    ? null
-                    : Icon(
-                        Icons.person_outline,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-              ),
+              _avatar(theme, has: has),
               SizedBox(width: tokens.spaceLg),
               // The copy takes the remaining width and wraps: at double text
               // size a fixed row of avatar plus two lines is the first thing
               // on this screen that would run off the edge.
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Photo',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    SizedBox(height: tokens.spaceXs / 2),
-                    Text(
-                      'Optional — not every design shows one.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
+                child: templateShowsPhoto
+                    ? _offerCopy(theme, tokens)
+                    : _keptHeading(theme, tokens),
               ),
             ],
           ),
-          // Only when there is really something to say: the user has added a
-          // photo *and* this design does not draw one. A permanent label on
-          // five designs would be read once and never again, while this
-          // appears exactly when it answers a question the user is about to
-          // ask.
-          if (has && !templateShowsPhoto) ...[
+          // The disclosure runs the full width of the tile rather than the
+          // column beside the avatar. At double text size that column is
+          // ~180px on a small phone, which turns three sentences into eleven
+          // ragged lines with the avatar floating in the middle of them.
+          if (!templateShowsPhoto) ...[
             SizedBox(height: tokens.spaceMd),
-            _PhotoIgnoredNote(
-              templateName: templateName,
-              onChangeTemplate: onChangeTemplate,
+            Text(
+              '$templateName is a text-only design and prints no photo. Yours '
+              'stays saved for the designs that do — the gallery marks those '
+              '"Photo".',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
           SizedBox(height: tokens.spaceMd),
@@ -1673,15 +1682,30 @@ class _PhotoTile extends StatelessWidget {
             spacing: tokens.spaceSm,
             runSpacing: tokens.spaceSm,
             children: [
-              OutlinedButton.icon(
-                onPressed: onPick,
-                icon: const Icon(Icons.add_a_photo_outlined, size: 18),
-                label: Text(
-                  has ? 'Replace photo' : 'Add photo',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+              if (templateShowsPhoto)
+                OutlinedButton.icon(
+                  onPressed: onPick,
+                  icon: const Icon(Icons.add_a_photo_outlined, size: 18),
+                  // Wraps rather than ellipsizes, for the same reason as the
+                  // design action below: at double text size on a 360px phone
+                  // the cap bit, and "Replace ph…" was the result.
+                  label: Text(has ? 'Replace photo' : 'Add photo'),
+                )
+              else
+                // The one action that changes the outcome, in the slot the
+                // picker vacated. Same icon as the app bar's design action, so
+                // the two read as the same door rather than two offers.
+                OutlinedButton.icon(
+                  onPressed: onChangeTemplate,
+                  icon: const Icon(Icons.palette_outlined, size: 18),
+                  // Wraps rather than ellipsizes: at double text size on a
+                  // small phone this label does not fit on one line, and
+                  // "Change de…" is not a thing anyone can act on.
+                  label: const Text('Change design'),
                 ),
-              ),
+              // Reachable in both states. On a photo-free design this is the
+              // only control the user has over a photo they already added, and
+              // taking it away with the picker would strand their own data.
               if (has)
                 TextButton(onPressed: onRemove, child: const Text('Remove')),
             ],
@@ -1690,70 +1714,98 @@ class _PhotoTile extends StatelessWidget {
       ),
     );
   }
-}
 
-/// Says that the design in use leaves the user's photo out.
-///
-/// Five of the thirteen designs render no portrait — see `photoFreeTemplateIds`,
-/// which is derived from the templates' own source rather than listed by hand —
-/// and three of them say in their doc comments that a photograph is not part of
-/// the design. That is not a defect, and adding photos to them would erase a
-/// deliberate distinction between the designs. The defect QA actually found is
-/// that **nothing ever told the user**: a photo was added, a design was chosen,
-/// and the portrait silently did not appear.
-///
-/// So this is a disclosure, not a warning. It states which design is leaving
-/// the photo out, says the photo is still there, and offers the one action that
-/// changes the outcome. Deliberately not the error container the truncation
-/// banner uses: nothing has been lost and nothing has failed — the design is
-/// doing what it says it does.
-class _PhotoIgnoredNote extends StatelessWidget {
-  const _PhotoIgnoredNote({
-    required this.templateName,
-    required this.onChangeTemplate,
-  });
+  Widget _avatar(ThemeData theme, {required bool has}) {
+    final circle = Container(
+      width: _avatarSize,
+      height: _avatarSize,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        // Raised out of the well it sits in, not sunk further into it: an
+        // empty avatar drawn in the same tint as its surroundings is a hole,
+        // not a placeholder.
+        color: theme.colorScheme.surfaceContainerHigh,
+        // The visible outline, not the decorative hairline: this circle is the
+        // subject of the actions below it, and a tint step alone leaves it with
+        // no edge to speak of.
+        border: Border.all(color: theme.colorScheme.outline),
+        image: has
+            ? DecorationImage(image: MemoryImage(photo), fit: BoxFit.cover)
+            : null,
+      ),
+      child: has
+          ? null
+          : Icon(
+              Icons.person_outline,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+    );
 
-  final String templateName;
-  final VoidCallback onChangeTemplate;
+    // A DecorationImage announces nothing on its own, so a screen reader would
+    // otherwise arrive at "Remove" with no idea what it removes.
+    return has
+        ? Semantics(image: true, label: 'Your photo', child: circle)
+        : ExcludeSemantics(child: circle);
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final tokens = context.tokens;
-
-    return Row(
+  /// Copy for a design that prints the portrait.
+  Widget _offerCopy(ThemeData theme, AppTokens tokens) {
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // The accent, which is what the eye finds on this palette, and the one
+        Text(
+          'Photo',
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        SizedBox(height: tokens.spaceXs / 2),
+        Text(
+          'Optional — not every design shows one.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The heading beside the avatar when the design prints no portrait.
+  ///
+  /// A disclosure, not a warning: nothing has been lost and nothing has failed
+  /// — the design is doing what the gallery says it does. The sentence that
+  /// follows it names the design, says the photo is still there, and points at
+  /// the word the gallery marks the designs that would print it with.
+  /// Deliberately not the error container the truncation banner uses.
+  Widget _keptHeading(ThemeData theme, AppTokens tokens) {
+    return Row(
+      // Top, not centre: the heading wraps to three lines at double text size
+      // in the column left beside the avatar, and a centred icon lands in the
+      // middle of the words rather than at the start of them.
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // The accent, which is what the eye finds on this palette and the one
         // colour in the app that means "look here". 9.06:1 on the well it is
         // drawn in, the same pairing every section mark uses.
-        Icon(
-          Icons.hide_image_outlined,
-          size: 20,
-          color: theme.colorScheme.primary,
+        Padding(
+          // Optically centres an 18px glyph on the first line of 14px text,
+          // where a bare Row would hang it from the very top.
+          padding: EdgeInsets.only(top: tokens.spaceXs / 2),
+          child: Icon(
+            Icons.hide_image_outlined,
+            size: 18,
+            color: theme.colorScheme.primary,
+          ),
         ),
-        SizedBox(width: tokens.spaceMd),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '$templateName is a text-only design and prints no photo. '
-                'Your photo stays saved, ready for a design that shows one.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurface,
-                ),
-              ),
-              // Left-aligned under the sentence it follows, and its own node
-              // for a screen reader rather than merged into the explanation.
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton(
-                  onPressed: onChangeTemplate,
-                  child: const Text('Change design'),
-                ),
-              ),
-            ],
+        SizedBox(width: tokens.spaceSm),
+        // Flexible, not Expanded: the heading wraps inside what is left of a
+        // 360px row after the avatar, and must not demand more.
+        Flexible(
+          child: Text(
+            'Photo saved, not printed',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
       ],
